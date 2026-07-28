@@ -23,6 +23,7 @@ class _Buffer:
     def __init__(self):
         self._internal_buffer: dict[str, list] = defaultdict(list)
         self._individual_uids: dict[str, UUID] = defaultdict(create_uuid)
+        self._uid_positions: dict[str, dict[UUID, int]] = defaultdict(dict)
 
     def append_to_queue(self, queue_name: str, line: str):
         self._internal_buffer[queue_name].append(line)
@@ -33,14 +34,34 @@ class _Buffer:
 
         if start < 0:
             start = len(buffer) + start
-        start = max(start, 0)
+        start = max(min(start, len(buffer) - 1), 0)
 
         if end is None:
             return buffer[start:]
         return buffer[start:end]
 
+    def lookup_queue_by_uid(self, queue_name: str, start_uid: UUID, limit: int | None = None) -> list[str] | None:
+        position = self._uid_positions[queue_name].get(start_uid)
+        if position is None:
+            return None
+
+        if limit is not None:
+            end_position = position + limit
+        else:
+            end_position = None
+
+        return self.lookup_queue(queue_name, position, end_position)
+
     def get_uid_for_queue(self, queue_name: str) -> UUID:
-        return self._individual_uids[queue_name]
+        current_uid = self._individual_uids[queue_name]
+        # NOTE: Next time, if looking up by uid, exclude this messaage from the results too.
+        current_buffer_position = len(self._internal_buffer[queue_name])
+
+        # NOTE: We only need to keep track of UIDs that are returned by this call,
+        # since otherwise the user has no way of knowing any UIDs.
+        self._uid_positions[queue_name][current_uid] = max(current_buffer_position, 0)
+
+        return current_uid
 
 
 class _LogCentralizerHandler(logging.Handler):
@@ -150,6 +171,10 @@ class LogCentralizer:
     def lookup_queue(self, queue_name: str, start: int = 0, end: int | None = None) -> list[str]:
         """Fetch a subsection of the console logs from a queue."""
         return self._buffer.lookup_queue(queue_name, start, end)
+
+    def lookup_queue_by_uid(self, queue_name: str, start_uid: UUID, limit: int | None = None) -> list[str] | None:
+        """Fetch a subsection of the console logs from a queue."""
+        return self._buffer.lookup_queue_by_uid(queue_name, start_uid, limit)
 
     def get_uid_for_queue(self, queue_name: str) -> UUID:
         """Return the UID associated with the current queue's console state."""

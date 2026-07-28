@@ -385,3 +385,36 @@ async def test_console_output(client: httpx.AsyncClient):
 
         message = "Finished loading environment!"
         assert any(message in _line for _line in console_obj.lines), console_obj.lines
+
+        message = "Server started successfully!"
+        assert any(message in _line for _line in console_obj.lines), console_obj.lines
+
+
+async def test_console_output_update(client: httpx.AsyncClient):
+    response = await client.get("/queue/console_output/uid")
+    uid_obj = ConsoleUidResponse.model_validate(response.json())
+
+    assert uid_obj.success, uid_obj
+
+    initial_uid = uid_obj.uid
+
+    async with open_environment(client):
+        response = await client.get("/queue/console_output/uid")
+        uid_obj = ConsoleUidResponse.model_validate(response.json())
+
+        assert uid_obj.success, uid_obj
+
+        end_uid = uid_obj.uid
+
+        assert initial_uid != end_uid
+
+        response = await client.get(f"/queue/console_output_update?last_msg_uid={initial_uid}")
+        console_obj = LatestConsoleResponse.model_validate(response.json())
+
+        assert console_obj.success
+
+        message = "Finished loading environment!"
+        assert any(message in _line for _line in console_obj.lines), console_obj.lines
+
+        message = "Server started successfully!"
+        assert not any(message in _line for _line in console_obj.lines), console_obj.lines

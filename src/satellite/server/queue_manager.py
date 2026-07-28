@@ -7,7 +7,7 @@ import os
 import subprocess
 import time
 from typing import Any, Literal, cast, no_type_check
-from uuid import uuid4 as create_uuid
+from uuid import UUID, uuid4 as create_uuid
 
 from fastapi import APIRouter
 
@@ -1140,6 +1140,30 @@ class QueueManager:
         return_lines = log_centralizer.lookup_queue(self._name, start=-lines)
         ret.lines = return_lines
 
+        return ret
+
+    @get_endpoint("/console_output_update")
+    async def get_console_output_from_uid(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+        """
+        Retrieve the most recent lines of logging / console output, generated after some point.
+
+        Parameters
+        ----------
+        last_msg_uid : UUID or str
+            The uid (as returned by `/console_output/uid`) from which to start collecting lines.
+        lines : int, optional
+            Maximum amount of lines to retrieve. Defaults to 200.
+        """
+        ret = LatestConsoleResponse()
+
+        log_centralizer = get_global_log_centralizer()
+        return_lines = log_centralizer.lookup_queue_by_uid(self._name, last_msg_uid, limit=lines)
+        if return_lines is None:
+            ret.success = False
+            ret.msg = f"Failed to retrieve console output: UID '{str(last_msg_uid)}' is not valid."
+            return ret
+
+        ret.lines = return_lines
         return ret
 
     @get_endpoint("/console_output/uid")

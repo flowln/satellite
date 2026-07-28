@@ -95,15 +95,6 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
 
     formatter = logging.getLogger("satellite.server").handlers[0].formatter
     for manager_name, configuration in manager_config.managers.items():
-        configuration.network.mock_arguments.update(mock_arguments or {})
-
-        manager = QueueManager(manager_name, configuration)
-        router = manager.get_router()
-
-        app.include_router(router, tags=[manager_name], prefix=f"/{manager_name}")
-        if manager_name == manager_config.primary_manager:
-            app.include_router(router)
-
         # Configure logging / console
         logger = logging.getLogger(f"satellite.{manager_name}")
         logger.setLevel(manager_config.operation.actual_logging_level)
@@ -114,6 +105,15 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
             formatter,
             level=manager_config.operation.actual_logging_level,
         )
+
+        configuration.network.mock_arguments.update(mock_arguments or {})
+
+        manager = QueueManager(manager_name, configuration)
+        router = manager.get_router()
+
+        app.include_router(router, tags=[manager_name], prefix=f"/{manager_name}")
+        if manager_name == manager_config.primary_manager:
+            app.include_router(router)
 
     def _process_openapi_descriptions() -> dict[str, Any]:
         """Convert NumpyDoc-style endpoint descriptions into Markdown, so Swagger and Redoc can render it."""

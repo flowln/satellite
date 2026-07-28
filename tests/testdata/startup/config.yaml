@@ -1,0 +1,13 @@
+network:
+  use_mocked_backend: true
+
+operation:
+  print_console_output: true
+  console_logging_level: VERBOSE
+
+primary_manager: queue
+
+managers:
+  queue:
+    startup:
+      startup_dir: tests/testdata/startup

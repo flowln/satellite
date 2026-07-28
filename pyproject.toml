@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "satellite"
+description = "HTTP-based server for managing Bluesky plan queues"
+authors = [{ name = "Sofia Donato Ferreira", email = "sofiafia@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "click",
+    "httpx",
+    "numpydoc",
+    "pydantic",
+]
+dynamic = ["version"]
+readme = "README.md"
+
+[project.optional-dependencies]
+server = [
+    "fastapi[standard-no-fastapi-cloud-cli]",
+    "bluesky",
+    "pyyaml",
+    "redis[hiredis]",
+]
+dev = [
+    "anyio",
+    "fakeredis[json]",
+    "pre-commit",
+    "pytest",
+    "ruff",
+]
+all = [
+    "satellite[server,dev]"
+]
+
+[project.scripts]
+satellite-server = "satellite.server.main:entrypoint"
+satellite-server-environment = "satellite.server.environment:entrypoint"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme = "node-and-date"
+version_file = "src/satellite/__version__.py"
+
+[tool.fastapi]
+entrypoint = "satellite.server.main:_create_app"
+
+[tool.ruff]
+exclude = ["__version__.py", "docs/*"]
+
+line-length = 120
+[tool.ruff.lint]
+select = [
+    "B",       # flake8-bugbear - https://docs.astral.sh/ruff/rules/#flake8-bugbear-b
+    "C4",      # flake8-comprehensions - https://docs.astral.sh/ruff/rules/#flake8-comprehensions-c4
+    "E",       # pycodestyle errors - https://docs.astral.sh/ruff/rules/#error-e
+    "F",       # pyflakes rules - https://docs.astral.sh/ruff/rules/#pyflakes-f
+    "N",       # pep8-naming - https://docs.astral.sh/ruff/rules/#pep8-naming-n
+    "W",       # pycodestyle warnings - https://docs.astral.sh/ruff/rules/#warning-w
+    "I",       # isort - https://docs.astral.sh/ruff/rules/#isort-i
+    "UP",      # pyupgrade - https://docs.astral.sh/ruff/rules/#pyupgrade-up
+    "SLF",     # self - https://docs.astral.sh/ruff/settings/#lintflake8-self
+    "LOG015",  # root logger call - https://docs.astral.sh/ruff/rules/root-logger-call/
+    "S101",    # assert - https://docs.astral.sh/ruff/rules/assert/
+    "FAST",    # fastapi - https://docs.astral.sh/ruff/rules/#fastapi-fast
+    "D101", "D102", "D103",
+    "D200", "D201", "D202", "D204", "D205", "D206",
+    "D207", "D208", "D209", "D210", "D211", "D213",
+    "D300",
+    "D419"
+
+]
+ignore = [
+    "B901", # Return in a generator is needed for plans
+]
+exclude = ["tests/testdata/**"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "D"]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+combine-as-imports = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.numpydoc_validation]
+checks = ["all", "EX01", "SA01", "ES01", "RT01"]
+exclude_files = ["^tests/.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+anyio_mode = "auto"

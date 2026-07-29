@@ -91,6 +91,13 @@ def data_path() -> Path:
     return Path(__file__).parent / "testdata"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def ensure_environment_packages_are_cached():
+    import subprocess
+
+    subprocess.run(["pip", "install", "ophyd", "matplotlib"])
+
+
 @pytest.fixture
 def client(monkeypatch, data_path) -> httpx.AsyncClient:
     config_path = str(data_path / "startup" / "config.yaml")

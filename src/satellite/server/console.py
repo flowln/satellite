@@ -71,7 +71,7 @@ class _LogCentralizerHandler(logging.Handler):
         self,
         *args,
         queue_name: str,
-        owner: weakref.ProxyType[object],
+        owner: weakref.ProxyType,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -94,7 +94,7 @@ class _LogCentralizerHandler(logging.Handler):
 
         self._buffer.append_to_queue(self._queue_name, line)
 
-    def get_owner(self) -> weakref.ProxyType[object]:
+    def get_owner(self) -> weakref.ProxyType:
         return self._owner
 
     def __repr__(self) -> str:

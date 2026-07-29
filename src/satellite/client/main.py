@@ -3,6 +3,7 @@ import copy
 import itertools
 import pathlib
 from string import Template
+import subprocess
 import sys
 
 import click
@@ -22,13 +23,41 @@ return ret
 """)
 
 
+def _get_current_git_revision() -> str:
+    command = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True)
+    if command.returncode != 0:
+        print(f"Failed to get current git revision: {command.stderr.decode()}", file=sys.stderr)
+
+        return "unknown"
+
+    return command.stdout.decode().strip()
+
+
 def _load_template(package_root: pathlib.Path) -> ast.Module:
     template_path = package_root / "client" / "_base_template.py"
 
     with open(template_path) as _file:
         source_code = _file.read()
 
-    return ast.parse(source_code, template_path)
+    parsed_template = ast.parse(source_code, template_path)
+
+    if not isinstance(parsed_template.body[0], ast.Expr) or not isinstance(parsed_template.body[0].value, ast.Constant):
+        print("Failed to parse template's docstring.", file=sys.stderr)
+
+        return parsed_template
+
+    docstring = Template(str(parsed_template.body[0].value.value))
+
+    from datetime import UTC, datetime
+
+    current_time = datetime.now(UTC).isoformat(timespec="minutes")
+    git_revision = _get_current_git_revision()
+
+    new_docstring = docstring.substitute(generation_date=current_time, generation_git_revision=git_revision)
+
+    parsed_template.body[0].value.value = new_docstring
+
+    return parsed_template
 
 
 def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, endpoint_type: str):
@@ -129,8 +158,6 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
 
 
 def _run_ruff_on_file(file: str | pathlib.Path):
-    import subprocess
-
     ruff_format_output = subprocess.run(["ruff", "format", file], capture_output=True)
 
     if ruff_format_output.returncode != 0:

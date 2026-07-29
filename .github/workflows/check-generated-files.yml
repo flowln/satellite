@@ -21,4 +21,4 @@ jobs:
       - name: Generate client code
         run: satellite-client-generate -o generated.py
       - name: Compare generated code with committed code
-        run: diff -q --text generated.py src/satellite/client/_generated_base_client.py
+        run: diff --text -I "\s*Date.*" -I "\s*Git revision.*" generated.py src/satellite/client/_generated_base_client.py

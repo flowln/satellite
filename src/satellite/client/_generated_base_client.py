@@ -1,3 +1,14 @@
+"""
+This file is auto-generated! Do NOT manually edit it.
+
+Instead, check 'main.py' for the logic that generates it or,
+if applicable, change the final client code in 'client.py' instead.
+
+This file was generated at:
+Date: 2026-07-29T23:32+00:00
+Git revision: 2411e0c6d5060d82e6cee2acefbd9d91e5016df6
+"""
+
 from typing import Literal
 from uuid import UUID
 

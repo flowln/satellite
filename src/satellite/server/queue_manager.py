@@ -430,7 +430,7 @@ class QueueManager:
         return ret
 
     @get_endpoint("/ping")
-    async def ping(self):
+    async def ping(self) -> dict[Literal["message"], Literal["pong"]]:
         """Test connectivity with the queue manager. Always responds 'pong'."""
         return {"message": "pong"}
 

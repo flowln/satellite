@@ -52,3 +52,19 @@ async def test_environment_open_close(python_client: AsyncClient):
 
         if ttime.time() - _initial_time >= 5.0:
             pytest.fail("Timed out waiting for the worker environment to be closed.")
+
+
+async def test_environment_open_close_with_wait_condition(python_client: AsyncClient):
+    response = await python_client.environment_open()
+    assert response.success, response.msg
+
+    await python_client.wait_for_idle(timeout=5)
+    status = await python_client.status()
+    assert status.manager_state == "idle"
+
+    response = await python_client.environment_close()
+    assert response.success, response.msg
+
+    await python_client.wait_for_idle(timeout=5)
+    status = await python_client.status()
+    assert status.manager_state == "idle"

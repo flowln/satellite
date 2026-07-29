@@ -19,3 +19,6 @@ class AsyncClient(BaseAsyncClient):
             request_url += "&".join(parameters)
 
         return await self.get(request_url)
+
+    async def _post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
+        return await self.post(endpoint, json=kwargs)

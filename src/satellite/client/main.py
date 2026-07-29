@@ -3,11 +3,19 @@ import copy
 import itertools
 import pathlib
 from string import Template
+import sys
 
 import click
 
 _GET_CODE = Template("""
 response = await self._get_implementation(\"$endpoint\"$combined_parameters)
+response.raise_for_status()
+ret = $return_type_conversion(response.json())
+return ret
+""")
+
+_POST_CODE = Template("""
+response = await self._post_implementation(\"$endpoint\"$combined_parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
@@ -24,6 +32,11 @@ def _load_template(package_root: pathlib.Path) -> ast.Module:
 
 
 def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, endpoint_type: str):
+    """
+    Generate a default implementation for methods calling an endpoint.
+
+    This function generates the code body of the method specified by 'node'.
+    """
     return_type_conversion = "()"
     if isinstance(node.returns, ast.Name):
         return_type_name = node.returns.id
@@ -55,42 +68,29 @@ def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, en
                 )
             )
         case "POST":
-            return ast.parse(f'return (await self._post_implementation("{endpoint}"{combined_parameters}))')
+            return ast.parse(
+                _POST_CODE.substitute(
+                    endpoint=endpoint,
+                    combined_parameters=combined_parameters,
+                    return_type_conversion=return_type_conversion,
+                )
+            )
         case _:
             raise RuntimeError(
                 f"Failed to generate implementation for '{endpoint}': Unrecognized type: {endpoint_type}"
             )
 
 
-@click.command("satellite-client-generate")
-@click.option("-o", "--output-file", default=None, help="Path on which to output the generated file.")
-def generate_client(output_file: str | None):
-    """Generate a Python client for the API."""
-    package_root = pathlib.Path(__file__).parent.parent
-
-    queue_manager_path = package_root / "server" / "queue_manager.py"
-
-    with open(queue_manager_path) as _file:
-        source_code = _file.read()
-
-    root_node = ast.parse(source_code, queue_manager_path)
-
-    queue_manager_class_node = None
-    for _node in root_node.body:
-        match _node:
-            case ast.ClassDef("QueueManager", _):
-                queue_manager_class_node = _node
-                break
-            case _:
-                continue
-
-    if queue_manager_class_node is None:
-        raise RuntimeError("Failed to find 'QueueManager' class inside AST.")
-
+def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: pathlib.Path) -> ast.Module:
+    """Parse endpoint methods from 'class_node', and generate equivalent client-side methods from them."""
     finished_node = _load_template(package_root)
 
     def _add_endpoint(node: ast.AsyncFunctionDef, endpoint: str, endpoint_type: str):
+        """Add the endpoint implemented by 'node' to the list of methods to generate in the output."""
         nonlocal finished_node
+
+        # Change the method name to the endpoint's name
+        node.name = endpoint.replace("/", "_").removeprefix("_")
 
         # Keep only the docstring, and add the new logic
         node.body = [node.body[0], _generate_async_implementation(node, endpoint, endpoint_type)]
@@ -101,7 +101,7 @@ def generate_client(output_file: str | None):
 
             _node.body.append(node)
 
-    for _node in queue_manager_class_node.body:
+    for _node in class_node.body:
         match _node:
             case ast.AsyncFunctionDef(_, _, _, _decorators, _, _, _):
                 for idx, _decorator in enumerate(_node.decorator_list):
@@ -125,6 +125,57 @@ def generate_client(output_file: str | None):
             case _:
                 continue
 
+    return finished_node
+
+
+def _run_ruff_on_file(file: str | pathlib.Path):
+    import subprocess
+
+    ruff_format_output = subprocess.run(["ruff", "format", file], capture_output=True)
+
+    if ruff_format_output.returncode != 0:
+        print("Failed to run 'ruff format' on the generated file:", file=sys.stderr)
+        print(ruff_format_output.stdout.decode(), file=sys.stderr)
+        print(ruff_format_output.stderr.decode(), file=sys.stderr)
+    else:
+        print("Successfully ran 'ruff format' on the generated file.")
+
+    ruff_check_output = subprocess.run(["ruff", "check", "--fix", file], capture_output=True)
+
+    if ruff_check_output.returncode != 0:
+        print("Failed to run 'ruff check --fix' on the generated file:", file=sys.stderr)
+        print(ruff_check_output.stdout.decode(), file=sys.stderr)
+        print(ruff_check_output.stderr.decode(), file=sys.stderr)
+    else:
+        print("Successfully ran 'ruff check --fix' on the generated file.")
+
+
+@click.command("satellite-client-generate")
+@click.option("-o", "--output-file", default=None, help="Path on which to output the generated file.")
+def generate_client(output_file: str | None):
+    """Generate a base implementation of Python clients for the satellite server API."""
+    package_root = pathlib.Path(__file__).parent.parent
+
+    queue_manager_path = package_root / "server" / "queue_manager.py"
+
+    with open(queue_manager_path) as _file:
+        source_code = _file.read()
+
+    root_node = ast.parse(source_code, queue_manager_path)
+
+    queue_manager_class_node = None
+    for _node in root_node.body:
+        match _node:
+            case ast.ClassDef("QueueManager", _):
+                queue_manager_class_node = _node
+                break
+            case _:
+                continue
+
+    if queue_manager_class_node is None:
+        raise RuntimeError("Failed to find 'QueueManager' class inside AST.")
+
+    finished_node = _parse_and_generate_from_class_node(queue_manager_class_node, package_root)
     generated_source_code = ast.unparse(finished_node)
 
     if output_file is None:
@@ -132,5 +183,7 @@ def generate_client(output_file: str | None):
 
     with open(output_file, "w") as _file:
         _file.write(generated_source_code)
+
+    _run_ruff_on_file(output_file)
 
     print(f"Generated file successfully at '{output_file}'.")

@@ -16,8 +16,20 @@ from satellite.models import (
 
 
 class BaseAsyncClient(httpx.AsyncClient):
-    def __init__(self, server_address: httpx.URL | str, **kwargs):
-        super().__init__(base_url=server_address, **kwargs)
+    def __init__(self, server_address: httpx.URL | str, queue_name: str | None = None, **kwargs):
+        self._base_url = server_address
+        self._queue_name = queue_name
+        super().__init__(base_url=self.base_address, **kwargs)
+
+    @property
+    def queue_name(self) -> str | None:
+        return self._queue_name
+
+    @property
+    def base_address(self) -> httpx.URL:
+        if self.queue_name is None:
+            return httpx.URL(self._base_url)
+        return httpx.URL(self._base_url.join("/" + self.queue_name))
 
     async def _get_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         raise NotImplementedError
@@ -49,7 +61,10 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        return await self._post_implementation("/environment_open", lock_key=lock_key)
+        response = await self._post_implementation("/environment_open", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def environment_close(self, lock_key: str | None = None) -> GenericResponse:
         """
@@ -61,7 +76,10 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        return await self._post_implementation("/environment_close", lock_key=lock_key)
+        response = await self._post_implementation("/environment_close", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def environment_destroy(self, lock_key: str | None = None) -> GenericResponse:
         """
@@ -76,7 +94,10 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        return await self._post_implementation("/environment_destroy", lock_key=lock_key)
+        response = await self._post_implementation("/environment_destroy", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def history_get(self, limit: int | None = None, offset: int = 0) -> HistoryResponse:
         """
@@ -99,7 +120,10 @@ class BaseAsyncClient(httpx.AsyncClient):
 
     async def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
-        return await self._post_implementation("/history_clear")
+        response = await self._post_implementation("/history_clear")
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
@@ -117,7 +141,10 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/queue_clear", lock_key=lock_key)
+        response = await self._post_implementation("/queue_clear", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def queue_item_add(
         self,
@@ -167,7 +194,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation(
+        response = await self._post_implementation(
             "/queue_item_add",
             item=item,
             user_group=user_group,
@@ -177,6 +204,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             after_uid=after_uid,
             lock_key=lock_key,
         )
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
 
     async def queue_item_remove(
         self, pos: int | Literal["front", "back"] | None = None, uid: str | None = None, lock_key: str | None = None
@@ -203,7 +233,10 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/queue_item_remove", pos=pos, uid=uid, lock_key=lock_key)
+        response = await self._post_implementation("/queue_item_remove", pos=pos, uid=uid, lock_key=lock_key)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
 
     async def queue_start(self, lock_key: str | None = None) -> GenericResponse:
         """
@@ -214,7 +247,10 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/queue_start", lock_key=lock_key)
+        response = await self._post_implementation("/queue_start", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def queue_stop(self, lock_key: str | None = None) -> GenericResponse:
         """
@@ -228,7 +264,10 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/queue_stop", lock_key=lock_key)
+        response = await self._post_implementation("/queue_stop", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
     async def queue_stop_cancel(self, lock_key: str | None = None) -> GenericResponse:
         """
@@ -242,9 +281,12 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/queue_stop_cancel", lock_key=lock_key)
+        response = await self._post_implementation("/queue_stop_cancel", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
-    async def run_engine_pause(
+    async def re_pause(
         self, option: Literal["immediate", "deferred"] = "deferred", lock_key: str | None = None
     ) -> GenericResponse:
         """
@@ -263,9 +305,12 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/re_pause", option=option, lock_key=lock_key)
+        response = await self._post_implementation("/re_pause", option=option, lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
-    async def run_engine_resume(self, lock_key: str | None = None) -> GenericResponse:
+    async def re_resume(self, lock_key: str | None = None) -> GenericResponse:
         """
         Resume execution of a paused item.
 
@@ -274,9 +319,12 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/re_resume", lock_key=lock_key)
+        response = await self._post_implementation("/re_resume", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
-    async def run_engine_stop(self, lock_key: str | None = None) -> GenericResponse:
+    async def re_stop(self, lock_key: str | None = None) -> GenericResponse:
         """
         Stop execution of a paused item.
 
@@ -285,9 +333,12 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/re_stop", lock_key=lock_key)
+        response = await self._post_implementation("/re_stop", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
-    async def run_engine_abort(self, lock_key: str | None = None) -> GenericResponse:
+    async def re_abort(self, lock_key: str | None = None) -> GenericResponse:
         """
         Abort execution of a paused item.
 
@@ -296,9 +347,12 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/re_abort", lock_key=lock_key)
+        response = await self._post_implementation("/re_abort", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
-    async def run_engine_halt(self, lock_key: str | None = None) -> GenericResponse:
+    async def re_halt(self, lock_key: str | None = None) -> GenericResponse:
         """
         Halt execution of a paused item.
 
@@ -307,9 +361,12 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        return await self._post_implementation("/re_halt", lock_key=lock_key)
+        response = await self._post_implementation("/re_halt", lock_key=lock_key)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
 
-    async def get_console_output(self, lines: int = 200) -> LatestConsoleResponse:
+    async def console_output(self, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output.
 
@@ -323,7 +380,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
-    async def get_console_output_from_uid(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    async def console_output_update(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -339,7 +396,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
-    async def get_console_output_uid(self) -> ConsoleUidResponse:
+    async def console_output_uid(self) -> ConsoleUidResponse:
         """
         Get a unique identifier for the current state of the console output.
 

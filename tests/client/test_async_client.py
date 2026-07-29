@@ -1,3 +1,6 @@
+import asyncio
+import time as ttime
+
 import httpx
 import pytest
 
@@ -27,3 +30,25 @@ async def test_status(python_client: AsyncClient):
     response = await python_client.status()
     assert isinstance(response, ManagerStatus)
     assert response.manager_state == "idle"
+
+
+async def test_environment_open_close(python_client: AsyncClient):
+    response = await python_client.environment_open()
+    assert response.success, response.msg
+
+    _initial_time = ttime.time()
+    while (await python_client.status()).worker_environment_state != "idle":
+        await asyncio.sleep(0.05)
+
+        if ttime.time() - _initial_time >= 5.0:
+            pytest.fail("Timed out waiting for the worker environment to report itself as 'idle'.")
+
+    response = await python_client.environment_close()
+    assert response.success, response.msg
+
+    _initial_time = ttime.time()
+    while (await python_client.status()).worker_environment_exists:
+        await asyncio.sleep(0.05)
+
+        if ttime.time() - _initial_time >= 5.0:
+            pytest.fail("Timed out waiting for the worker environment to be closed.")

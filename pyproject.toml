@@ -28,7 +28,7 @@ dev = [
     "fakeredis[json]",
     "pre-commit",
     "pytest",
-    "ruff",
+    "ruff~=0.16.0",  # Semi-fixed to avoid arbitrary formatting changes.
 ]
 all = [
     "satellite[server,dev]"

@@ -28,7 +28,7 @@ dev = [
     "fakeredis[json]",
     "pre-commit",
     "pytest",
-    "ruff",
+    "ruff~=0.16.0",  # Semi-fixed to avoid arbitrary formatting changes.
 ]
 all = [
     "satellite[server,dev]"
@@ -37,6 +37,7 @@ all = [
 [project.scripts]
 satellite-server = "satellite.server.main:entrypoint"
 satellite-server-environment = "satellite.server.environment:entrypoint"
+satellite-client-generate = "satellite.client.main:generate_client"
 
 [tool.setuptools]
 include-package-data = true

@@ -14,6 +14,8 @@ These are the missing features in relation to the original implementations, that
 - [ ] Support for QueueServer's annotation decorator
 - [X] Load queue / history state at startup
 - [ ] Python library / Command-line interface
+  - [X] Python library (Sync and Async versions)
+  - [ ] Command-line utility
 - [ ] Lock key support
 - [ ] ZMQ endpoints
 - [ ] HTTP API configuration

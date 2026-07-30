@@ -190,8 +190,18 @@ def test_pipe_log(centralizer, queue_name, tmp_path):
         _proc = Popen([sys.executable, str(subprocess_code_path)], stdout=_out, stderr=_err)
         _proc.wait(timeout=2.5)
 
-        assert centralizer[0].lookup_queue(queue_name) == [
+        got = centralizer[0].lookup_queue(queue_name)
+        expected_a = [
             "INFO Line #1",
             "INFO Line #2",
             "ERROR Line #3",
         ]
+        expected_b = [
+            "ERROR Line #3",
+            "INFO Line #1",
+            "INFO Line #2",
+        ]
+
+        # NOTE: Since it's not deterministic which pipe will become available first,
+        # to avoid adding an arbitrary timeout, we accept either valid end result.
+        assert got == expected_a or got == expected_b

@@ -92,6 +92,22 @@ def data_path() -> Path:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def configure_multiprocessing_module():
+    from multiprocessing import get_start_method, set_start_method
+    import sys
+
+    old_start_method = get_start_method()
+    if sys.platform == "linux":
+        set_start_method("forkserver", force=True)
+    else:
+        set_start_method("spawn", force=True)
+
+    yield
+
+    set_start_method(old_start_method, force=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
 def ensure_environment_packages_are_cached():
     import subprocess
 

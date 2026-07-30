@@ -8,7 +8,7 @@ on:
 
 jobs:
   pre-commit:
-    name: Run pre-commit
+    name: Run prek (pre-commit)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -17,4 +17,4 @@ jobs:
       - name: Run pre-commit (prek) on the changed files
         uses: j178/prek-action@v2.0.6
         with:
-          extra-args: --from-ref ${{ GITHUB_BASE_REF }} --to-ref HEAD
+          extra-args: --from-ref origin/${{ github.base_ref }} --to-ref HEAD

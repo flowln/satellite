@@ -14,7 +14,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Run pre-commit (prek) on the changed files
+
+      - name: Run pre-commit (prek) on the changed files (PR)
         uses: j178/prek-action@v2.0.6
+        if: github.ref_name != 'main'
         with:
           extra-args: --from-ref origin/${{ github.base_ref }} --to-ref HEAD
+
+      - name: Run pre-commit (prek) on all files (main)
+        uses: j178/prek-action@v2.0.6
+        if: github.ref_name == 'main'
+        with:
+          extra-args: --all-files

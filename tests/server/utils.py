@@ -48,3 +48,13 @@ async def open_environment(client: httpx.AsyncClient, *, clear: bool = True):
     (await client.post("/queue/environment_close")).raise_for_status()
 
     await wait_status_change(client, _wait_for_idle())
+
+
+def assert_response(response: httpx.Response) -> httpx.Response:
+    assert response.status_code == 200
+
+    response_body = response.json()
+    assert response_body["success"], response_body["msg"]
+    assert response_body["msg"] == ""
+
+    return response

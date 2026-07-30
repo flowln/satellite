@@ -13,7 +13,7 @@ from satellite.models import (
 )
 from satellite.server.persistence import RedisPersistenceBackend
 
-from .utils import open_environment, wait_status_change
+from .utils import assert_response, open_environment, wait_status_change
 
 
 async def test_ping(client):
@@ -27,13 +27,9 @@ async def test_queue_add_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
-
-    assert response.status_code == 200
+        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
 
     response_body = response.json()
-    assert response_body["success"], response_body["msg"]
-    assert response_body["msg"] == ""
     assert response_body["qsize"] == 1
 
     returned_item = QueueItem.model_validate(response_body["item"])
@@ -44,13 +40,10 @@ async def test_queue_add_count(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="count", args=[["rand"]], kwargs={"num": 10})
         request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
 
-    assert response.status_code == 200
+        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
 
     response_body = response.json()
-    assert response_body["success"], response_body["msg"]
-    assert response_body["msg"] == ""
     assert response_body["qsize"] == 1
 
     returned_item = QueueItem.model_validate(response_body["item"])
@@ -74,24 +67,16 @@ async def test_queue_remove_by_uid(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
 
-    assert response.status_code == 200
-
-    response_body = response.json()
-    assert response_body["success"], response_body["msg"]
-    assert response_body["msg"] == ""
-    assert response_body["qsize"] == 1
+        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        response_body = response.json()
+        assert response_body["qsize"] == 1
 
     added_item = QueueItem.model_validate(response_body["item"])
     assert added_item.uid is not None
 
-    response = await client.post(f"/queue/queue_item_remove?uid={added_item.uid}")
-    assert response.status_code == 200
-
+    response = assert_response(await client.post(f"/queue/queue_item_remove?uid={added_item.uid}"))
     response_body = response.json()
-    assert response_body["success"], response_body["msg"]
-    assert response_body["msg"] == ""
     assert response_body["qsize"] == 0
 
     removed_item = QueueItem.model_validate(response_body["item"])
@@ -102,60 +87,40 @@ async def test_queue_remove_by_position(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
 
-        assert response.status_code == 200
-
+        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
         response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
         assert response_body["qsize"] == 1
 
         first_uid = QueueItem.model_validate(response_body["item"]).uid
 
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
 
-        assert response.status_code == 200
-
+        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
         response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
         assert response_body["qsize"] == 2
 
         second_uid = QueueItem.model_validate(response_body["item"]).uid
 
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
 
-        assert response.status_code == 200
-
+        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
         response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
         assert response_body["qsize"] == 3
 
         third_uid = QueueItem.model_validate(response_body["item"]).uid
 
-    response = await client.post("/queue/queue_item_remove?pos=1")
-    assert response.status_code == 200
-
+    response = assert_response(await client.post("/queue/queue_item_remove?pos=1"))
     response_body = response.json()
-    assert response_body["success"], response_body["msg"]
-    assert response_body["msg"] == ""
     assert response_body["qsize"] == 2
 
     removed_item = QueueItem.model_validate(response_body["item"])
     assert removed_item.uid == second_uid, (first_uid, second_uid, third_uid)
 
-    response = await client.post("/queue/queue_item_remove?pos=back")
-    assert response.status_code == 200
-
+    response = assert_response(await client.post("/queue/queue_item_remove?pos=back"))
     response_body = response.json()
-    assert response_body["success"], response_body["msg"]
-    assert response_body["msg"] == ""
     assert response_body["qsize"] == 1
 
     removed_item = QueueItem.model_validate(response_body["item"])
@@ -171,12 +136,7 @@ async def test_queue_run_simple(client: httpx.AsyncClient):
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         old_queue_uid = old_status.plan_queue_uid
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -209,12 +169,7 @@ async def test_history_simple(client: httpx.AsyncClient):
         old_queue_uid = old_status.plan_queue_uid
         old_history_uid = old_status.plan_history_uid
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -260,12 +215,7 @@ async def test_queue_run_in_sequence(client: httpx.AsyncClient):
         for _ in range(7):
             await client.post("/queue/queue_item_add", json=request_body)
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -288,11 +238,7 @@ async def test_queue_run_in_sequence(client: httpx.AsyncClient):
         await wait_status_change(client, wait_history_change(1))
         await wait_status_change(client, wait_history_change(2))
 
-        response = await client.post("/queue/queue_stop")
-        assert response.status_code == 200
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_stop"))
 
         # Run until the end of the current run
         await wait_status_change(client, wait_history_change(3))
@@ -301,25 +247,12 @@ async def test_queue_run_in_sequence(client: httpx.AsyncClient):
         status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         assert status.worker_environment_state == "idle"
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_status_change(client, wait_history_change(5))
 
-        response = await client.post("/queue/queue_stop")
-        assert response.status_code == 200
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
-
-        response = await client.post("/queue/queue_stop_cancel")
-        assert response.status_code == 200
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_stop"))
+        assert_response(await client.post("/queue/queue_stop_cancel"))
 
         await wait_status_change(client, wait_history_change(7))
 

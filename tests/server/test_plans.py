@@ -6,7 +6,7 @@ import pytest
 
 from satellite.models import HistoryItem, ManagerStatus, QueueItem
 
-from .utils import wait_status_change
+from .utils import assert_response, wait_status_change
 
 
 async def wait_for_idle(client: httpx.AsyncClient):
@@ -127,12 +127,7 @@ class TestPlanExecution:
         old_history_uid = old_status.plan_history_uid
         old_history_size = old_status.items_in_history
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
         await wait_until_item_ran(client, old_history_uid, old_history_size)
@@ -162,12 +157,7 @@ class TestPlanExecution:
         old_history_uid = old_status.plan_history_uid
         old_history_size = old_status.items_in_history
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
         await client.post("/queue/re_pause?option=immediate")
@@ -191,12 +181,7 @@ class TestPlanExecution:
         old_queue_uid = old_status.plan_queue_uid
         old_queue_size = old_status.items_in_queue
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
 

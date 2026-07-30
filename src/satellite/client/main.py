@@ -8,15 +8,29 @@ import sys
 
 import click
 
-_GET_CODE = Template("""
-response = await self._get_implementation(\"$endpoint\"$combined_parameters)
+_GET_ASYNC_CODE = Template("""
+response = await self.get_implementation(\"$endpoint\"$combined_parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
 
-_POST_CODE = Template("""
-response = await self._post_implementation(\"$endpoint\"$combined_parameters)
+_POST_ASYNC_CODE = Template("""
+response = await self.post_implementation(\"$endpoint\"$combined_parameters)
+response.raise_for_status()
+ret = $return_type_conversion(response.json())
+return ret
+""")
+
+_GET_SYNC_CODE = Template("""
+response = self.get_implementation(\"$endpoint\"$combined_parameters)
+response.raise_for_status()
+ret = $return_type_conversion(response.json())
+return ret
+""")
+
+_POST_SYNC_CODE = Template("""
+response = self.post_implementation(\"$endpoint\"$combined_parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
@@ -60,12 +74,7 @@ def _load_template(package_root: pathlib.Path) -> ast.Module:
     return parsed_template
 
 
-def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, endpoint_type: str):
-    """
-    Generate a default implementation for methods calling an endpoint.
-
-    This function generates the code body of the method specified by 'node'.
-    """
+def _parse_args_and_kwargs_from_node(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, str]:
     return_type_conversion = "()"
     if isinstance(node.returns, ast.Name):
         return_type_name = node.returns.id
@@ -87,10 +96,21 @@ def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, en
     if len(combined_parameters) != 0:
         combined_parameters = ", " + combined_parameters
 
+    return return_type_conversion, combined_parameters
+
+
+def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, endpoint_type: str):
+    """
+    Generate a default implementation for methods calling an endpoint.
+
+    This function generates the code body of the method specified by 'node'.
+    """
+    return_type_conversion, combined_parameters = _parse_args_and_kwargs_from_node(node)
+
     match endpoint_type:
         case "GET":
             return ast.parse(
-                _GET_CODE.substitute(
+                _GET_ASYNC_CODE.substitute(
                     endpoint=endpoint,
                     combined_parameters=combined_parameters,
                     return_type_conversion=return_type_conversion,
@@ -98,7 +118,38 @@ def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, en
             )
         case "POST":
             return ast.parse(
-                _POST_CODE.substitute(
+                _POST_ASYNC_CODE.substitute(
+                    endpoint=endpoint,
+                    combined_parameters=combined_parameters,
+                    return_type_conversion=return_type_conversion,
+                )
+            )
+        case _:
+            raise RuntimeError(
+                f"Failed to generate implementation for '{endpoint}': Unrecognized type: {endpoint_type}"
+            )
+
+
+def _generate_sync_implementation(node: ast.FunctionDef, endpoint: str, endpoint_type: str):
+    """
+    Generate a default implementation for methods calling an endpoint.
+
+    This function generates the code body of the method specified by 'node'.
+    """
+    return_type_conversion, combined_parameters = _parse_args_and_kwargs_from_node(node)
+
+    match endpoint_type:
+        case "GET":
+            return ast.parse(
+                _GET_SYNC_CODE.substitute(
+                    endpoint=endpoint,
+                    combined_parameters=combined_parameters,
+                    return_type_conversion=return_type_conversion,
+                )
+            )
+        case "POST":
+            return ast.parse(
+                _POST_SYNC_CODE.substitute(
                     endpoint=endpoint,
                     combined_parameters=combined_parameters,
                     return_type_conversion=return_type_conversion,
@@ -121,14 +172,34 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
         # Change the method name to the endpoint's name
         node.name = endpoint.replace("/", "_").removeprefix("_")
 
-        # Keep only the docstring, and add the new logic
-        node.body = [node.body[0], _generate_async_implementation(node, endpoint, endpoint_type)]
-
-        for _node in finished_node.body:
-            if not isinstance(_node, ast.ClassDef):
+        for _output_node in finished_node.body:
+            if not isinstance(_output_node, ast.ClassDef):
                 continue
 
-            _node.body.append(node)
+            if "async" in _output_node.name.lower():
+                # Keep only the docstring, and add the new logic
+                node.body = [node.body[0], _generate_async_implementation(node, endpoint, endpoint_type)]
+
+                _output_node.body.append(copy.deepcopy(node))
+            else:
+                sync_node = ast.FunctionDef(
+                    node.name,
+                    node.args,
+                    node.body,
+                    node.decorator_list,
+                    node.returns,
+                    node.type_comment,
+                    node.type_params,
+                    col_offset=node.col_offset,
+                    end_col_offset=node.end_col_offset,
+                    lineno=node.lineno,
+                    end_lineno=node.end_lineno,
+                )
+
+                # Keep only the docstring, and add the new logic
+                sync_node.body = [sync_node.body[0], _generate_sync_implementation(sync_node, endpoint, endpoint_type)]
+
+                _output_node.body.append(sync_node)
 
     for _node in class_node.body:
         match _node:

@@ -28,7 +28,10 @@ Date: $generation_date
 Git revision: $generation_git_revision
 """
 
-from typing import Literal
+from collections.abc import Coroutine
+import asyncio
+
+from typing import Literal, Any
 from uuid import UUID
 
 import httpx
@@ -62,8 +65,58 @@ class BaseAsyncClient(httpx.AsyncClient):
             return httpx.URL(self._base_url)
         return httpx.URL(self._base_url.join("/" + self.queue_name))
 
-    async def _get_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
+    async def get_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         raise NotImplementedError
 
-    async def _post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
+    async def post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         raise NotImplementedError
+
+
+class BaseSyncClient:
+    def __init__(self, server_address: httpx.URL | str, queue_name: str | None = None, **kwargs):
+        self._loop = asyncio.new_event_loop()
+        self._client = BaseAsyncClient(server_address, queue_name, **kwargs)
+
+        # NOTE: This method needs to be completely overriden by a subclass, since `_client` needs
+        # to be of a subclass type of BaseAsyncClient that actually implements the needed methods.
+        raise NotImplementedError
+
+    @property
+    def queue_name(self) -> str | None:
+        return self._client.queue_name
+
+    @property
+    def base_address(self) -> httpx.URL:
+        return self._client.base_address
+
+    def _run_coroutine(self, coro: Coroutine) -> Any:
+        result = None
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop running in the current thread: we can run our own.
+
+            task = self._loop.create_task(coro)
+            result = self._loop.run_until_complete(task)
+        else:
+            # Loop already running in the current thread: run our own in a separate thread.
+
+            def _execute_coro():
+                nonlocal result
+
+                result = self._loop.run_until_complete(coro)
+
+            import threading
+
+            worker = threading.Thread(target=_execute_coro, daemon=True)
+            worker.start()
+            worker.join(timeout=10.0)
+
+        return result
+
+    def get_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
+        return self._run_coroutine(self._client.get_implementation(endpoint, **kwargs))
+
+    def post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
+        return self._run_coroutine(self._client.post_implementation(endpoint, **kwargs))

@@ -59,7 +59,7 @@ RetrieveAllDeviceAnnotationsResult = namedtuple("RetrieveAllDeviceAnnotationsRes
 RunProvidedItem = namedtuple("RunProvidedItem", ("uuid", "item"))
 RunProvidedItemResponse = namedtuple("RunProvidedItemResponse", ("uuid"))
 
-ProvidedItemFinished = namedtuple("ProvidedItemFinished", ("uuid", "item"))
+ProvidedItemFinished = namedtuple("ProvidedItemFinished", ("uuid", "item", "stop_queue"), defaults=(None, None, False))
 
 PauseExecution = namedtuple("PauseExecution", ("uuid", "is_deferred"))
 PauseExecutionResult = namedtuple("PauseExecutionResult", ("uuid", "succeeded", "fail_message"))
@@ -356,7 +356,14 @@ class EnvironmentProcess:
 
                 await self._resume_plan(new_plan_item=item)
             case "instruction":
-                pass
+                history_item = HistoryItem.from_queue_item(item)
+                match item.name:
+                    case "queue_stop":
+                        await self._conn.send_message(ProvidedItemFinished(history_item.uid, history_item, True))
+                    case unrecognized:
+                        self._logger.error("Unrecognized item type '%s'. Ignoring it.", unrecognized)
+
+                        await self._conn.send_message(ProvidedItemFinished(history_item.uid, history_item))
 
     async def _resume_plan(self, *, new_plan_item: QueueItem | None = None):
         if self._run_engine is None:

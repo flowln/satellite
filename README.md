@@ -22,7 +22,7 @@ These are the missing features in relation to the original implementations, that
 - [ ] WebSocket endpoints
 - [X] Console API
 - [ ] Task support
-- [ ] Instructions support
+- [X] Instructions support
 - [ ] Loop mode
 - [ ] Batch endpoints
 - [ ] Queue autostart

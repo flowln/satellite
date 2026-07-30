@@ -4,9 +4,9 @@ from uuid import UUID
 import httpx
 import pytest
 
-from satellite.models import HistoryItem, ManagerStatus, QueueItem
+from satellite.models import HistoryItem, HistoryResponse, ManagerStatus, QueueItem
 
-from .utils import wait_status_change
+from .utils import assert_response, open_environment, wait_status_change
 
 
 async def wait_for_idle(client: httpx.AsyncClient):
@@ -127,12 +127,7 @@ class TestPlanExecution:
         old_history_uid = old_status.plan_history_uid
         old_history_size = old_status.items_in_history
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
         await wait_until_item_ran(client, old_history_uid, old_history_size)
@@ -162,12 +157,7 @@ class TestPlanExecution:
         old_history_uid = old_status.plan_history_uid
         old_history_size = old_status.items_in_history
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
         await client.post("/queue/re_pause?option=immediate")
@@ -191,12 +181,7 @@ class TestPlanExecution:
         old_queue_uid = old_status.plan_queue_uid
         old_queue_size = old_status.items_in_queue
 
-        response = await client.post("/queue/queue_start")
-        assert response.status_code == 200
-
-        response_body = response.json()
-        assert response_body["success"], response_body["msg"]
-        assert response_body["msg"] == ""
+        assert_response(await client.post("/queue/queue_start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
 
@@ -209,3 +194,54 @@ class TestPlanExecution:
         await client.post("/queue/environment_destroy")
 
         await wait_for_idle(client)
+
+
+async def test_queue_run_instruction(client: httpx.AsyncClient):
+    async with open_environment(client):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = item.model_dump(mode="json")
+        for _ in range(3):
+            assert_response(await client.post("/queue/queue_item_add", json=request_body))
+
+        instruction_item = QueueItem(name="queue_stop", item_type="instruction")
+        instruction_item_request = instruction_item.model_dump(mode="json")
+        assert_response(await client.post("/queue/queue_item_add", json=instruction_item_request))
+
+        for _ in range(3):
+            assert_response(await client.post("/queue/queue_item_add", json=request_body))
+
+        assert_response(await client.post("/queue/queue_start"))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+
+        status = ManagerStatus.model_validate(response.json())
+        assert status.worker_environment_exists
+
+        async def wait_history_change(remaining_items: int):
+            while True:
+                _status = (await client.get("/queue/status")).json()
+                model = ManagerStatus.model_validate(_status)
+
+                assert model.worker_environment_exists
+
+                if model.items_in_history == remaining_items:
+                    break
+
+                await asyncio.sleep(0.05)
+
+        await wait_status_change(client, wait_history_change(4))
+
+        status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
+        assert status.manager_state == "idle"
+        assert status.worker_environment_state == "idle"
+        assert status.running_item_uid is None
+
+        last_history = HistoryResponse.model_validate((await client.get("/queue/history_get?limit=1")).json())
+        instruction_item = last_history.items[0]
+        assert instruction_item.type == "instruction"
+        assert instruction_item.name == "queue_stop"
+
+        assert_response(await client.post("/queue/queue_start"))
+
+        await wait_status_change(client, wait_history_change(7))

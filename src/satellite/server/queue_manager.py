@@ -207,7 +207,7 @@ class QueueManager:
                 self._status.items_in_queue -= 1
                 self._status.plan_queue_uid = create_uuid()
                 self._status.running_item_uid = item.uid
-            case ProvidedItemFinished(_uuid, item):
+            case ProvidedItemFinished(_uuid, item, stop_queue):
                 self._status.running_item_uid = None
 
                 await self._persistence_backend.history_insert_item(item, 0)
@@ -215,7 +215,7 @@ class QueueManager:
                 self._status.plan_history_uid = create_uuid()
                 self._status.items_in_history += 1
 
-                if self._status.queue_stop_pending or self._status.items_in_queue == 0:
+                if self._status.queue_stop_pending or self._status.items_in_queue == 0 or stop_queue:
                     self._status.queue_stop_pending = False
 
                     await self._status.update_manager_state("idle", force=force_update_status)

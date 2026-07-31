@@ -292,6 +292,10 @@ class RedisPersistenceBackend(PersistenceBackend):
 
         self.response_error = ResponseError
 
+        # NOTE: This storage is used to optimize usage of the '_ensure_initialized' method, by avoiding
+        # calling into the API if unnecessary.
+        self._initialized_keys = set()
+
     async def _get_with_sub_key(self, item_type: type[BaseModel], key: str, sub_key: str | None = None):
         if sub_key is None:
             try:
@@ -321,7 +325,12 @@ class RedisPersistenceBackend(PersistenceBackend):
         return return_value
 
     async def _ensure_initialized(self, key: str, *, default_factory: Callable = list):
+        if key in self._initialized_keys:
+            return
+
         await self._client.json().set(key, "$", default_factory(), nx=True)
+
+        self._initialized_keys.add(key)
 
     @wraps(PersistenceBackend.get_existing_plans)
     async def get_existing_plans(self, sub_key: str | None = None) -> dict[str, PlanAnnotation] | PlanAnnotation | None:  # noqa

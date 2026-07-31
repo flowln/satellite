@@ -197,6 +197,7 @@ class LogCentralizer:
         self._internal_socket_server_thread = threading.Thread(
             target=self._internal_socket_server.serve_forever,
             name=self._internal_socket_server_name,
+            kwargs={"poll_interval": 0.033},
             daemon=True,
         )
         self._internal_socket_server_thread.start()
@@ -234,9 +235,6 @@ class LogCentralizer:
         """Stop serving connections with the socket server, closing the thread and the associated resources."""
         if self._internal_socket_server_thread is not None:
             self._internal_socket_server.shutdown()
-            self._internal_socket_server_thread.join(timeout=2.0)
-            self._internal_socket_server_thread = None
-
             self._internal_socket_server.server_close()
 
     @property

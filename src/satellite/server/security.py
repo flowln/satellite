@@ -24,6 +24,7 @@ def _check_api_key(
     _secret_keys: Annotated[list[str] | None, Depends(_get_secret_keys)],
     api_key_query: Annotated[str, Security(API_KEY_QUERY)],
     api_key_header: Annotated[str, Security(API_KEY_HEADER)],
+    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
 ) -> bool:
     if _secret_keys is None:
         return False
@@ -33,6 +34,9 @@ def _check_api_key(
         return True
     if api_key_header in _secret_keys:
         return True
+
+    if configuration.authentication.allow_anonymous_access:
+        return False
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

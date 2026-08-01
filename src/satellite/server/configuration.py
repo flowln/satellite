@@ -47,6 +47,9 @@ class _ManagerAuthenticationSection(BaseModel):
     In enclosed by ${...}, its value is taken from the corresponding environment variable.
     """
 
+    allow_anonymous_access: bool = Field(default=False)
+    """Allow public access without authentication. Defaults to False."""
+
 
 class _ManagerNetworkSection(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore")

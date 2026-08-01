@@ -70,6 +70,9 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
     manager_config = load_manager_configuration()
     manager_config.network.mock_arguments.update(mock_arguments or {})
 
+    logging_handler = logging.getLogger("satellite.server").handlers[0]
+    logging_handler.setLevel(manager_config.operation.actual_logging_level)
+
     openapi_tags = [
         {
             "name": "General",
@@ -93,7 +96,7 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
         """Test connectivity with the server. Always responds 'pong'."""
         return {"message": "pong"}
 
-    formatter = logging.getLogger("satellite.server").handlers[0].formatter
+    formatter = logging_handler.formatter
     for manager_name, configuration in manager_config.managers.items():
         # Configure logging / console
         logger = logging.getLogger(f"satellite.{manager_name}")

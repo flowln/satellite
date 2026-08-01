@@ -175,3 +175,5 @@ cython_debug/
 
 # Setuptools-scm verision file
 src/satellite/__version__.py
+
+prof/

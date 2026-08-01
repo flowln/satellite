@@ -508,7 +508,13 @@ class EnvironmentProcess:
         for file_path in files_to_load:
             self._logger.info("Loading file '%s'...", str(file_path))
 
+            _initial_time = ttime.perf_counter()
+
             self._environment_globals |= runpy.run_path(str(file_path), init_globals=self._environment_globals)
+
+            self._logger.info(
+                "Loaded file '%s' in %.3f ms.", str(file_path), (ttime.perf_counter() - _initial_time) * 1e3
+            )
 
             # Ensure all output from the loaded file is sent.
             sys.stdout.flush()

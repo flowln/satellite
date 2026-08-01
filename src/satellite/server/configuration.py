@@ -2,9 +2,11 @@ from argparse import ArgumentParser
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from yaml import SafeLoader, YAMLError, load
 
 logger = logging.getLogger("satellite.configuration")
 
@@ -33,6 +35,17 @@ def parse_cli_arguments():
 
         env_name = _ARGUMENTS[argument_name][2]
         os.environ[env_name] = value
+
+
+class _ManagerAuthenticationSection(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True, extra="ignore")
+
+    secret_keys: list[str] | None = Field(alias="secret_key", default=None)
+    """
+    Static API keys for authentication.
+
+    In enclosed by ${...}, its value is taken from the corresponding environment variable.
+    """
 
 
 class _ManagerNetworkSection(BaseModel):
@@ -85,6 +98,8 @@ class ManagerConfiguration(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore")
 
+    authentication: _ManagerAuthenticationSection = Field(default=_ManagerAuthenticationSection())
+    """Default 'authentication' section for all managers."""
     network: _ManagerNetworkSection = Field(default=_ManagerNetworkSection())
     """Default 'network' section for all managers."""
     operation: _ManagerOperationSection = Field(default=_ManagerOperationSection())
@@ -122,6 +137,21 @@ def _get_manager_configuration_location() -> Path:
     return path
 
 
+class _YamlEnvironmentVariableLoader(SafeLoader):
+    def construct_scalar(self, node):
+        value = super().construct_scalar(node)
+
+        if isinstance(value, str):
+            pattern = r"\$\{([^{}]+)\}"  # parse: ${(...)} -> (...)
+
+            matches = re.finditer(pattern, value)
+            for match in matches:
+                var_name = match.group(1)
+                value = value.replace(match.group(0), os.environ.get(var_name, ""))
+
+        return value
+
+
 def load_manager_configuration() -> ManagerConfiguration:
     """
     Load configuration from a YAML configuration file.
@@ -129,13 +159,11 @@ def load_manager_configuration() -> ManagerConfiguration:
     The configuration file is retrieved from the appropriate environment variable,
     which is also configured by command-line arguments if they are set.
     """
-    from yaml import YAMLError, safe_load
-
     configuration_path = _get_manager_configuration_location()
 
     try:
         with open(configuration_path) as _file:
-            parsed_data = safe_load(_file)
+            parsed_data = load(_file, _YamlEnvironmentVariableLoader)
     except YAMLError as exc:
         logger.exception(
             "Failed to parse file from '%s' as a valid YAML file:",

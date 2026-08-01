@@ -1,4 +1,5 @@
 from collections.abc import Callable
+import os
 from pathlib import Path
 import time
 from typing import Self
@@ -115,10 +116,16 @@ def ensure_environment_packages_are_cached():
 
 
 @pytest.fixture
-def client(monkeypatch, data_path) -> httpx.AsyncClient:
+def default_configuration_setup(monkeypatch, data_path):
+    if os.getenv("QSERVER_CONFIG") is not None:
+        return
+
     config_path = str(data_path / "startup" / "config.yaml")
     monkeypatch.setenv("QSERVER_CONFIG", config_path)
 
+
+@pytest.fixture
+def client(default_configuration_setup) -> httpx.AsyncClient:
     from satellite.server.main import _create_app
 
     app = _create_app()

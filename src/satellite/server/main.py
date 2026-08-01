@@ -17,6 +17,7 @@ from .configuration import (
     parse_cli_arguments,
 )
 from .queue_manager import QueueManager
+from .security import authenticate_dependencies
 
 
 def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
@@ -88,7 +89,7 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
             },
         )
 
-    app = FastAPI(openapi_tags=openapi_tags)
+    app = FastAPI(openapi_tags=openapi_tags, dependencies=authenticate_dependencies())
 
     @app.get("/", include_in_schema=False)
     @app.get("/ping", tags=["General"])

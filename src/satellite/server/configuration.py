@@ -40,7 +40,7 @@ def parse_cli_arguments():
 class _ManagerAuthenticationProvider(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True, extra="ignore")
 
-    provider: str
+    provider_name: str = Field(alias="provider")
     """Human-friendly name of the authentication provider."""
 
     mode: Literal["password"] = Field(default="password")

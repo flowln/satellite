@@ -1,7 +1,8 @@
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 import importlib
 import logging
-import ssl
+import os
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
@@ -23,10 +24,16 @@ API_KEY_HEADER = APIKeyHeader(name="x-api-key", auto_error=False)
 # Multi-user
 
 # FIXME: This should remain consistent across restarts
-JWT_SECRET_KEY = ssl.RAND_bytes(256)
+JWT_SECRET_KEY = os.urandom(256)
 JWT_ALGORITHM = "HS256"
 
 JWT_REFRESH_CLAIM = "refresh"
+JWT_PROVIDER_CLAIM = "provider"
+JWT_SALT_CLAIM = "salt"
+"""Used for providing uniqueness for each token, even if all parameters are equal."""
+
+# TODO: Periodically clean up this. Any expired token can be removed from the blacklist.
+JWT_BLACKLIST: dict[str, set] = defaultdict(set)
 
 PASSWORD_SCHEME = OAuth2PasswordBearer(tokenUrl="login", refreshUrl="session_refresh", auto_error=False)
 
@@ -82,14 +89,114 @@ def _get_access_token(username: str, expires_in: timedelta, claims: dict[JWT_CLA
     return encoded_jwt
 
 
-def _create_tokens_for_provider(user_name: str, provider: _ManagerAuthenticationProvider) -> tuple[str, str]:
-    expiration_time = timedelta(seconds=provider.expiration_time)
-    refresh_expiration_time = timedelta(seconds=provider.refresh_expiration_time)
+def _create_tokens_for_provider(
+    user_name: str,
+    provider: _ManagerAuthenticationProvider,
+    override_expiration_time: int | float | None = None,
+    override_refresh_expiration_time: int | float | None = None,
+) -> tuple[str, int | float, str, int | float]:
+    if override_expiration_time is None:
+        override_expiration_time = provider.expiration_time
+    else:
+        override_expiration_time = min(override_expiration_time, provider.expiration_time)
+    expiration_time = timedelta(seconds=override_expiration_time)
 
-    token = _get_access_token(user_name, expiration_time)
-    refresh_token = _get_access_token(user_name, refresh_expiration_time, {JWT_REFRESH_CLAIM: True})
+    if override_refresh_expiration_time is None:
+        override_refresh_expiration_time = provider.refresh_expiration_time
+    else:
+        override_refresh_expiration_time = min(override_refresh_expiration_time, provider.refresh_expiration_time)
+    refresh_expiration_time = timedelta(seconds=override_refresh_expiration_time)
 
-    return token, refresh_token
+    token = _get_access_token(
+        user_name,
+        expiration_time,
+        {
+            JWT_REFRESH_CLAIM: False,
+            JWT_PROVIDER_CLAIM: provider.provider_name,
+            JWT_SALT_CLAIM: int.from_bytes(os.urandom(8)),
+        },
+    )
+    refresh_token = _get_access_token(
+        user_name,
+        refresh_expiration_time,
+        {
+            JWT_REFRESH_CLAIM: True,
+            JWT_PROVIDER_CLAIM: provider.provider_name,
+            JWT_SALT_CLAIM: int.from_bytes(os.urandom(8)),
+        },
+    )
+
+    return token, expiration_time.total_seconds(), refresh_token, refresh_expiration_time.total_seconds()
+
+
+def _get_decoded_token(
+    token: Annotated[str, Depends(PASSWORD_SCHEME)],
+    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
+) -> dict[str, Any] | str:
+    """
+    Parse a raw token into its payload (claims).
+
+    Arguments
+    ---------
+    token : str
+        The raw JWT token.
+    configuration : ManagerConfiguration
+        The current server configuration.
+
+    Raises
+    ------
+    HTTPException
+        If the configuration doesn't allow for anonymous access, and the token is not valid.
+
+    Returns
+    -------
+    dict[str, Any]
+        A dictionary containing the claims this token contains. An extra key is added ('raw_token')
+        with the original raw token string.
+    str
+        If the token is invalid for some reason, and anonymous access is allowed, the reason for the
+        token being invalid is returned.
+    """
+
+    def _raise_exception_if_needed(extra_msg: str, previous_exc: Exception | None = None):
+        if not configuration.authentication.allow_anonymous_access:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Could not validate credentials: {extra_msg}",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from previous_exc
+        return extra_msg
+
+    try:
+        payload = jwt.decode(
+            token,
+            key=JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM],
+            options={"verify_exp": True, "verify_signature": True},
+        )
+        payload["raw_token"] = token
+        return payload
+    except jwt.InvalidSignatureError as exc:
+        logger.warning("Received token with invalid signature: '%s'.", token)
+
+        return _raise_exception_if_needed("Token has invalid signature.", exc)
+    except jwt.ExpiredSignatureError as exc:
+        logger.warning("Received expired token: '%s'.", token)
+
+        return _raise_exception_if_needed("Token has already expired.", exc)
+    except jwt.InvalidTokenError as exc:
+        return _raise_exception_if_needed("Failed to validate token.", exc)
+
+
+def _get_provider_by_name(provider_name: str, configuration: ManagerConfiguration) -> _ManagerAuthenticationProvider:
+    if configuration.authentication.providers is None:
+        raise RuntimeError
+
+    for provider in configuration.authentication.providers:
+        if provider.provider_name == provider_name:
+            return provider
+
+    raise RuntimeError
 
 
 def _create_password_login_handler(
@@ -101,23 +208,70 @@ def _create_password_login_handler(
     authenticator = authenticator_cls(**provider.args)
 
     @router.post("/login")
-    async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> SuccessfulLoginResponse:
+    async def login(
+        form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+        override_expiration_time: int | float | None = None,
+        override_refresh_expiration_time: int | float | None = None,
+    ) -> SuccessfulLoginResponse:
+        """
+        Check credentials and, if authenticated, return tokens for using the API.
+
+        Parameters
+        ----------
+        form_data : OAuth2PasswordRequestForm
+            Form information containing the username and password with which to authenticate.
+        override_expiration_time : int or float, optional
+            Set a lower expiration time than the provider's default. Cannot be higher than the default.
+        override_refresh_expiration_time : int or float, optional
+            Set a lower refresh expiration time than the provider's default. Cannot be higher than the default.
+        """
         username = form_data.username
         password = form_data.password
 
         if not authenticator.authenticate_with_password(username, password):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect username or password")
 
-        token, refresh_token = _create_tokens_for_provider(username, provider)
-        return SuccessfulLoginResponse(
-            token=token, refresh_token=refresh_token, expires_in=provider.expiration_time, token_type="bearer"
+        token, token_expires_in, refresh_token, _ = _create_tokens_for_provider(
+            username, provider, override_expiration_time, override_refresh_expiration_time
         )
+
+        return SuccessfulLoginResponse(
+            token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
+        )
+
+    @router.post("/logout")
+    async def logout(token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)]) -> bool:
+        """Revoke permissions from the given token, making it unusable."""
+        if isinstance(token, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Credentials are not valid: {token}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        global JWT_BLACKLIST
+        JWT_BLACKLIST[token[JWT_PROVIDER_CLAIM]].add(token["raw_token"])
+
+        return True
 
     @router.post("/session_refresh")
     async def session_refresh(
         token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)],
-        configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
+        override_expiration_time: int | float | None = None,
+        override_refresh_expiration_time: int | float | None = None,
     ) -> SuccessfulLoginResponse:
+        """
+        Use a valid refresh token to generate new valid access and refresh tokens.
+
+        Parameters
+        ----------
+        token : dict[str, Any] or str
+            The parsed and valid JWT refresh token to use.
+        override_expiration_time : int or float, optional
+            Set a lower expiration time than the provider's default. Cannot be higher than the default.
+        override_refresh_expiration_time : int or float, optional
+            Set a lower refresh expiration time than the provider's default. Cannot be higher than the default.
+        """
         if isinstance(token, str):
             logger.critical(
                 "Someone attempted to use an expired token to refresh the session. This can be indicative of an attack."
@@ -136,54 +290,32 @@ def _create_password_login_handler(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if configuration.authentication.providers is None:
-            raise RuntimeError
+        provider_name = token[JWT_PROVIDER_CLAIM]
+        if token["raw_token"] in JWT_BLACKLIST[provider_name]:
+            logger.critical("Attempted usage of revoked refresh token: '%s' for user '%s'.", token, token["sub"])
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This token has been revoked. This incident will be reported.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         user_name = token["sub"]
         logger.info("Refreshing tokens for user '%s'.", user_name)
 
-        token, refresh_token = _create_tokens_for_provider(user_name, provider)
+        token, token_expires_in, refresh_token, _ = _create_tokens_for_provider(
+            user_name, provider, override_expiration_time, override_refresh_expiration_time
+        )
         return SuccessfulLoginResponse(
-            token=token, refresh_token=refresh_token, expires_in=provider.expiration_time, token_type="bearer"
+            token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
         )
 
     @router.get("/whoami")
     async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
+        """Query information about the user authenticated with the used token."""
         return UserInformation(user_name=current_user)
 
     return router
-
-
-def _get_decoded_token(
-    token: Annotated[str, Depends(PASSWORD_SCHEME)],
-    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
-) -> dict[str, Any] | str:
-    def _raise_exception_if_needed(extra_msg: str, previous_exc: Exception | None = None):
-        if not configuration.authentication.allow_anonymous_access:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Could not validate credentials: {extra_msg}",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from previous_exc
-        return extra_msg
-
-    try:
-        return jwt.decode(
-            token,
-            key=JWT_SECRET_KEY,
-            algorithms=[JWT_ALGORITHM],
-            options={"verify_exp": True, "verify_signature": True},
-        )
-    except jwt.InvalidSignatureError as exc:
-        logger.warning("Received token with invalid signature: '%s'.", token)
-
-        return _raise_exception_if_needed("Token has invalid signature.", exc)
-    except jwt.ExpiredSignatureError as exc:
-        logger.warning("Received expired token: '%s'.", token)
-
-        return _raise_exception_if_needed("Token has already expired.", exc)
-    except jwt.InvalidTokenError as exc:
-        return _raise_exception_if_needed("Failed to validate token.", exc)
 
 
 def get_current_user(
@@ -192,6 +324,23 @@ def get_current_user(
     """FastAPI Dependency for validating a token and returning the user of that token."""
     if isinstance(token, str):
         return ANONYMOUS_USER_NAME
+
+    if token.get(JWT_REFRESH_CLAIM, False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot use a refresh token for accessing resources.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    provider_name = token[JWT_PROVIDER_CLAIM]
+    if token["raw_token"] in JWT_BLACKLIST[provider_name]:
+        logger.critical("Attempted usage of revoked access token: '%s' for user '%s'.", token, token["sub"])
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This token has been revoked. This incident will be reported.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     username = token["sub"]
     return username

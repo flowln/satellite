@@ -1,10 +1,13 @@
 import time as ttime
+from typing import cast
 
 import httpx
 import pytest
+import yaml
 
-from satellite.client.client import SyncClient
+from satellite.client.client import OAuthAuthentication, SyncClient
 from satellite.models import ManagerStatus
+from satellite.server.configuration import ManagerConfiguration, _ManagerAuthenticationProvider
 
 
 @pytest.fixture
@@ -72,3 +75,81 @@ def test_environment_open_close_with_wait_condition(python_client: SyncClient):
     python_client.wait_for_idle(timeout=5)
     status = python_client.status()
     assert status.manager_state == "idle"
+
+
+@pytest.fixture
+def python_client_with_auth(monkeypatch, tmp_path):
+    configuration = ManagerConfiguration()
+    configuration.network.use_mocked_backend = True
+    provider = _ManagerAuthenticationProvider(
+        provider="test",
+        expiration_time=10.0,
+        authenticator="satellite.server.security.authenticators:DictionaryAuthenticator",
+        args={"users_to_passwords": {"ed": "123", "molly": "456"}},
+    )
+    configuration.authentication.providers = [provider]
+
+    config_path = tmp_path / "config.yaml"
+    with open(config_path, "w") as _file:
+        yaml.safe_dump(configuration.model_dump(), stream=_file)
+
+    monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
+
+    from satellite.server.main import _create_app
+
+    app = _create_app()
+
+    _client = SyncClient("http://test", transport=httpx.ASGITransport(app=app))
+    yield _client
+
+
+def test_without_login(python_client_with_auth: SyncClient):
+    with pytest.raises(httpx.HTTPStatusError, match="401 Unauthorized"):
+        python_client_with_auth.status()
+
+
+def test_with_login(python_client_with_auth: SyncClient):
+    python_client_with_auth.login("ed", "123")
+
+    response = python_client_with_auth.status()
+    assert isinstance(response, ManagerStatus)
+    assert response.manager_state == "idle"
+
+
+def test_with_login_transparent_refresh(python_client_with_auth: SyncClient):
+    tokens = python_client_with_auth.login("ed", "123", expiration_time=1.0)
+    old_access_token = tokens.token
+
+    python_client_with_auth.status()
+    ttime.sleep(1.0)
+    python_client_with_auth.status()
+
+    new_access_token = cast(OAuthAuthentication, python_client_with_auth._client.auth).access_token  # noqa
+
+    assert old_access_token != new_access_token
+
+
+def test_with_login_logout(python_client_with_auth: SyncClient):
+    python_client_with_auth.login("ed", "123")
+
+    python_client_with_auth.status()
+
+    python_client_with_auth.logout()
+
+    with pytest.raises(httpx.HTTPStatusError, match="401 Unauthorized"):
+        python_client_with_auth.status()
+
+
+def test_with_login_refresh(python_client_with_auth: SyncClient):
+    python_client_with_auth.login("ed", "123", expiration_time=1.0)
+    python_client_with_auth.status()
+    ttime.sleep(1.0)
+    python_client_with_auth.refresh_session(expiration_time=1.0)
+    python_client_with_auth.status()
+
+
+def test_with_login_whoami(python_client_with_auth: SyncClient):
+    python_client_with_auth.login("ed", "123")
+
+    information = python_client_with_auth.whoami()
+    assert information.user_name == "ed"

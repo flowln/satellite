@@ -22,6 +22,8 @@ server = [
     "bluesky",
     "pyyaml",
     "redis[hiredis]",
+    "pyjwt",
+    "ldap3",
 ]
 dev = [
     "anyio",

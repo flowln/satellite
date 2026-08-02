@@ -28,6 +28,7 @@ Date: $generation_date
 Git revision: $generation_git_revision
 """
 
+from abc import abstractmethod
 from collections.abc import Coroutine
 import asyncio
 
@@ -45,6 +46,8 @@ from satellite.models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    SuccessfulLoginResponse,
+    UserInformation,
 )
 
 
@@ -70,6 +73,20 @@ class BaseAsyncClient(httpx.AsyncClient):
 
     async def post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         raise NotImplementedError
+
+    @abstractmethod
+    async def login(
+        self, user_name: str, password: str, *, expiration_time: int | float | None = None
+    ) -> SuccessfulLoginResponse: ...
+
+    @abstractmethod
+    async def logout(self): ...
+
+    @abstractmethod
+    async def refresh_session(self, *, expiration_time: int | float | None = None) -> SuccessfulLoginResponse: ...
+
+    @abstractmethod
+    async def whoami(self) -> UserInformation: ...
 
 
 class BaseSyncClient:

@@ -5,10 +5,11 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-07-30T02:12+00:00
-Git revision: fdbbba0d93acbf3d26242cba5644bb0212edc5b7
+Date: 2026-08-02T19:23+00:00
+Git revision: 2f7d3e1fd54a2a984f4dfb32800d7a810550cf6d
 """
 
+from abc import abstractmethod
 import asyncio
 from collections.abc import Coroutine
 from typing import Any, Literal
@@ -25,6 +26,8 @@ from satellite.models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    SuccessfulLoginResponse,
+    UserInformation,
 )
 
 
@@ -49,6 +52,20 @@ class BaseAsyncClient(httpx.AsyncClient):
 
     async def post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         raise NotImplementedError
+
+    @abstractmethod
+    async def login(
+        self, user_name: str, password: str, *, expiration_time: int | float | None = None
+    ) -> SuccessfulLoginResponse: ...
+
+    @abstractmethod
+    async def logout(self): ...
+
+    @abstractmethod
+    async def refresh_session(self, *, expiration_time: int | float | None = None) -> SuccessfulLoginResponse: ...
+
+    @abstractmethod
+    async def whoami(self) -> UserInformation: ...
 
     async def ping(self) -> dict[Literal["message"], Literal["pong"]]:
         """Test connectivity with the queue manager. Always responds 'pong'."""

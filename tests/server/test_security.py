@@ -206,6 +206,44 @@ class TestDictionary:
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 401
 
+    async def test_with_configuration_token_refresh(self, client: httpx.AsyncClient):
+        dependencies, _ = authenticate_dependencies()
+        assert len(dependencies) == 1
+
+        response = await client.post("/login", data={"username": "ed", "password": "123"})
+        assert response.status_code == 200
+        _return_time = ttime.time()
+
+        parsed_response = SuccessfulLoginResponse.model_validate(response.json())
+        assert parsed_response.token_type == "bearer"
+
+        response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
+        assert response.status_code == 200
+
+        claims = jwt.decode(parsed_response.token, key=JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM], subject="ed")
+        assert _return_time + parsed_response.expires_in == pytest.approx(claims["exp"], abs=1)
+
+        await asyncio.sleep(parsed_response.expires_in)
+
+        assert ttime.time() > claims["exp"]
+
+        response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
+        assert response.status_code == 401
+
+        new_tokens_response = await client.post(
+            "/session_refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
+        )
+        assert new_tokens_response.status_code == 200
+
+        new_tokens = SuccessfulLoginResponse.model_validate(new_tokens_response.json())
+
+        # Assert the old token remains expired
+        response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
+        assert response.status_code == 401
+
+        response = await client.get("/status", headers={"Authorization": f"Bearer {new_tokens.token}"})
+        assert response.status_code == 200
+
     async def test_with_configuration_whoami(self, client: httpx.AsyncClient):
         dependencies, _ = authenticate_dependencies()
         assert len(dependencies) == 1

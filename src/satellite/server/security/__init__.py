@@ -9,8 +9,7 @@ from fastapi.security import APIKeyHeader, APIKeyQuery, OAuth2PasswordBearer, OA
 import jwt
 
 from ...models import SuccessfulLoginResponse, UserInformation
-from ..configuration import ManagerConfiguration, load_manager_configuration
-from .authenticators import Authenticator
+from ..configuration import ManagerConfiguration, _ManagerAuthenticationProvider, load_manager_configuration
 
 logger = logging.getLogger("satellite.server.security")
 
@@ -27,7 +26,9 @@ API_KEY_HEADER = APIKeyHeader(name="x-api-key", auto_error=False)
 JWT_SECRET_KEY = ssl.RAND_bytes(256)
 JWT_ALGORITHM = "HS256"
 
-PASSWORD_SCHEME = OAuth2PasswordBearer(tokenUrl="login", auto_error=False)
+JWT_REFRESH_CLAIM = "refresh"
+
+PASSWORD_SCHEME = OAuth2PasswordBearer(tokenUrl="login", refreshUrl="session_refresh", auto_error=False)
 
 
 def _get_configuration() -> ManagerConfiguration:
@@ -66,7 +67,7 @@ def _check_api_key(
 JWT_CLAIMS = Literal["iss", "sub", "aud", "nbf", "exp", "iat", "jti"]
 
 
-def _get_access_token(username: str, expires_in: timedelta, claims: dict[JWT_CLAIMS, Any] | None = None) -> str:
+def _get_access_token(username: str, expires_in: timedelta, claims: dict[JWT_CLAIMS | str, Any] | None = None) -> str:
     to_encode = (claims or {}).copy()
 
     to_encode["sub"] = username
@@ -81,9 +82,24 @@ def _get_access_token(username: str, expires_in: timedelta, claims: dict[JWT_CLA
     return encoded_jwt
 
 
+def _create_tokens_for_provider(user_name: str, provider: _ManagerAuthenticationProvider) -> tuple[str, str]:
+    expiration_time = timedelta(seconds=provider.expiration_time)
+    refresh_expiration_time = timedelta(seconds=provider.refresh_expiration_time)
+
+    token = _get_access_token(user_name, expiration_time)
+    refresh_token = _get_access_token(user_name, refresh_expiration_time, {JWT_REFRESH_CLAIM: True})
+
+    return token, refresh_token
+
+
 def _create_password_login_handler(
-    router: APIRouter, authenticator: Authenticator, expiration_time: timedelta
+    router: APIRouter,
+    provider: _ManagerAuthenticationProvider,
 ) -> APIRouter:
+    module_path, class_name = provider.authenticator.split(":")
+    authenticator_cls = getattr(importlib.import_module(module_path), class_name)
+    authenticator = authenticator_cls(**provider.args)
+
     @router.post("/login")
     async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> SuccessfulLoginResponse:
         username = form_data.username
@@ -92,8 +108,44 @@ def _create_password_login_handler(
         if not authenticator.authenticate_with_password(username, password):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect username or password")
 
-        token = _get_access_token(username, expiration_time)
-        return SuccessfulLoginResponse(token=token, expires_in=expiration_time.total_seconds(), token_type="bearer")
+        token, refresh_token = _create_tokens_for_provider(username, provider)
+        return SuccessfulLoginResponse(
+            token=token, refresh_token=refresh_token, expires_in=provider.expiration_time, token_type="bearer"
+        )
+
+    @router.post("/session_refresh")
+    async def session_refresh(
+        token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)],
+        configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
+    ) -> SuccessfulLoginResponse:
+        if isinstance(token, str):
+            logger.critical(
+                "Someone attempted to use an expired token to refresh the session. This can be indicative of an attack."
+            )
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Could not validate credentials: {token}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not token.get(JWT_REFRESH_CLAIM, False):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Received token doesn't have the required '{JWT_REFRESH_CLAIM}' claim.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if configuration.authentication.providers is None:
+            raise RuntimeError
+
+        user_name = token["sub"]
+        logger.info("Refreshing tokens for user '%s'.", user_name)
+
+        token, refresh_token = _create_tokens_for_provider(user_name, provider)
+        return SuccessfulLoginResponse(
+            token=token, refresh_token=refresh_token, expires_in=provider.expiration_time, token_type="bearer"
+        )
 
     @router.get("/whoami")
     async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
@@ -102,12 +154,10 @@ def _create_password_login_handler(
     return router
 
 
-def get_current_user(
+def _get_decoded_token(
     token: Annotated[str, Depends(PASSWORD_SCHEME)],
     configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
-):
-    """FastAPI Dependency for validating a token and returning the user of that token."""
-
+) -> dict[str, Any] | str:
     def _raise_exception_if_needed(extra_msg: str, previous_exc: Exception | None = None):
         if not configuration.authentication.allow_anonymous_access:
             raise HTTPException(
@@ -115,33 +165,35 @@ def get_current_user(
                 detail=f"Could not validate credentials: {extra_msg}",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from previous_exc
+        return extra_msg
 
-    username = None
     try:
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             key=JWT_SECRET_KEY,
             algorithms=[JWT_ALGORITHM],
             options={"verify_exp": True, "verify_signature": True},
         )
-
-        username = payload.get("sub")
-        if username is None:
-            _raise_exception_if_needed("Token has no associated user.")
     except jwt.InvalidSignatureError as exc:
         logger.warning("Received token with invalid signature: '%s'.", token)
 
-        _raise_exception_if_needed("Token has invalid signature.", exc)
+        return _raise_exception_if_needed("Token has invalid signature.", exc)
     except jwt.ExpiredSignatureError as exc:
         logger.warning("Received expired token: '%s'.", token)
 
-        _raise_exception_if_needed("Token has already expired.", exc)
+        return _raise_exception_if_needed("Token has already expired.", exc)
     except jwt.InvalidTokenError as exc:
-        _raise_exception_if_needed("Failed to validate token.", exc)
+        return _raise_exception_if_needed("Failed to validate token.", exc)
 
-    if username is None:
-        username = ANONYMOUS_USER_NAME
 
+def get_current_user(
+    token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)],
+) -> str:
+    """FastAPI Dependency for validating a token and returning the user of that token."""
+    if isinstance(token, str):
+        return ANONYMOUS_USER_NAME
+
+    username = token["sub"]
     return username
 
 
@@ -167,18 +219,17 @@ def authenticate_dependencies() -> tuple[list, APIRouter]:
         dependencies.append(Security(_check_api_key))
 
     if configuration.authentication.providers is not None:
+        if len(configuration.authentication.providers) > 1:
+            logger.error("Received more than one authentication provider, which is not currently handled.")
+
         for provider in configuration.authentication.providers:
             if provider.mode == "password":
                 logger.debug("Using token-based authentication via password.")
                 dependencies.append(Security(get_current_user))
 
-                module_path, class_name = provider.authenticator.split(":")
-                authenticator_cls = getattr(importlib.import_module(module_path), class_name)
-                authenticator = authenticator_cls(**provider.args)
+                router = _create_password_login_handler(router, provider)
 
-                expiration_time = timedelta(seconds=provider.expiration_time)
-
-                router = _create_password_login_handler(router, authenticator, expiration_time)
+            break
 
     if len(dependencies) == 0:
         logger.warning("No authentication method has been set up.")

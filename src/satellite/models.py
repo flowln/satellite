@@ -25,6 +25,9 @@ class SuccessfulLoginResponse(BaseModel):
     token: str
     """JWT Token asserting the user's permission to access resources."""
 
+    refresh_token: str
+    """JWT Token enabling the user to generate new tokens for itself."""
+
     expires_in: int | float
     """
     Time, in seconds, that this token will remain valid after generating it.

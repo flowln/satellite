@@ -47,7 +47,10 @@ class _ManagerAuthenticationProvider(BaseModel):
     """Mode of authentication with this provider. Defaults to 'password' (send the user name and password)."""
 
     expiration_time: int | float = Field(default=900)
-    """The amount of time, in seconds, that a token remains valid after generating it. Defaults to 15 minutes."""
+    """Time, in seconds, that a token remains valid after generating it. Defaults to 15 minutes."""
+
+    refresh_expiration_time: int | float = Field(default=1800)
+    """Time, in seconds, that a refresh token remains valid after generating it. Defaults to 30 minutes."""
 
     authenticator: str
     """Python class path for an authentication provider."""

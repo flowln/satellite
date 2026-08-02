@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from yaml import SafeLoader, YAMLError, load
 
 logger = logging.getLogger("satellite.configuration")
@@ -37,6 +37,39 @@ def parse_cli_arguments():
         os.environ[env_name] = value
 
 
+class _ManagerAuthenticationProvider(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True, extra="ignore")
+
+    provider: str
+    """Human-friendly name of the authentication provider."""
+
+    mode: Literal["password"] = Field(default="password")
+    """Mode of authentication with this provider. Defaults to 'password' (send the user name and password)."""
+
+    expiration_time: int | float = Field(default=900)
+    """The amount of time, in seconds, that a token remains valid after generating it. Defaults to 15 minutes."""
+
+    authenticator: str
+    """Python class path for an authentication provider."""
+
+    args: dict[str, Any] = Field(default={})
+    """Extra arguments to send to the authenticator at instance creation."""
+
+    @field_validator("authenticator")
+    @classmethod
+    def validate_authenticator(cls, value) -> str:
+        from importlib.util import find_spec
+
+        try:
+            module_path = str(value).split(":")[0]
+            if find_spec(module_path) is None:
+                raise ValueError(f"Couldn't find module at '{module_path}'.")
+        except Exception as exc:
+            raise ValueError(f"Failed to parse '{repr(value)}' as a python class path.") from exc
+
+        return value
+
+
 class _ManagerAuthenticationSection(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True, extra="ignore")
 
@@ -50,13 +83,16 @@ class _ManagerAuthenticationSection(BaseModel):
     allow_anonymous_access: bool = Field(default=False)
     """Allow public access without authentication. Defaults to False."""
 
+    providers: list[_ManagerAuthenticationProvider] | None = Field(default=None)
+    """List of authentication providers to use."""
+
 
 class _ManagerNetworkSection(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore")
 
     persistence_backend: Literal["none", "redis"] = Field(default="redis", frozen=True)
     """Which method will be used to persist data across restarts."""
-    use_mocked_backend: bool = Field(default=False, frozen=True)
+    use_mocked_backend: bool = Field(default=False)
     """Use a mocked backend instead of connecting to real infrastructure."""
 
     mock_arguments: dict[str, Any] = Field(exclude=True, default={})

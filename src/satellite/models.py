@@ -17,6 +17,33 @@ def create_uuid() -> UUID:
     return uuid4()
 
 
+class SuccessfulLoginResponse(BaseModel):
+    """Response of a successful 'login' request."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    token: str
+    """JWT Token asserting the user's permission to access resources."""
+
+    expires_in: int | float
+    """
+    Time, in seconds, that this token will remain valid after generating it.
+
+    It is redundant with the 'exp' claim of the token, but allows for JWT-unaware clients to use the API.
+    """
+
+    token_type: Literal["bearer"] = Field(default="bearer")
+    """Specifies the way of using the returned token in subsequent API calls."""
+
+
+class UserInformation(BaseModel):
+    """Information about a user of the system, as returned by 'whoami'."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    user_name: str
+
+
 type ManagerState = Literal["idle", "creating_environment", "closing_environment", "executing_queue", "paused"]
 
 

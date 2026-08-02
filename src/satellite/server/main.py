@@ -79,6 +79,10 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
             "name": "General",
             "description": "Operations on the entire satellite server.",
         },
+        {
+            "name": "Security",
+            "description": "Authentication and authorization operations.",
+        },
     ]
 
     for manager_name in manager_config.managers.keys():
@@ -89,10 +93,11 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
             },
         )
 
-    app = FastAPI(openapi_tags=openapi_tags, dependencies=authenticate_dependencies())
+    require_authentication, router = authenticate_dependencies()
+    app = FastAPI(openapi_tags=openapi_tags)
+    app.include_router(router, tags=["Security"])
 
     @app.get("/", include_in_schema=False)
-    @app.get("/ping", tags=["General"])
     async def ping():
         """Test connectivity with the server. Always responds 'pong'."""
         return {"message": "pong"}
@@ -115,9 +120,9 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
         manager = QueueManager(manager_name, configuration)
         router = manager.get_router()
 
-        app.include_router(router, tags=[manager_name], prefix=f"/{manager_name}")
+        app.include_router(router, tags=[manager_name], prefix=f"/{manager_name}", dependencies=require_authentication)
         if manager_name == manager_config.primary_manager:
-            app.include_router(router)
+            app.include_router(router, dependencies=require_authentication)
 
     def _process_openapi_descriptions() -> dict[str, Any]:
         """Convert NumpyDoc-style endpoint descriptions into Markdown, so Swagger and Redoc can render it."""

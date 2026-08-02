@@ -212,7 +212,7 @@ class TestAuthenticator:
 
         jwt.decode(parsed_response.token, key=JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM], subject="ed")
 
-        parsed_response.token = parsed_response.token[:-1] + parsed_response.token[-1].swapcase()
+        parsed_response.token = parsed_response.token[:-1] + ("0" if parsed_response.token[-1] != "0" else "1")
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 401
 

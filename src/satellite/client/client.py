@@ -388,3 +388,55 @@ class SyncClient(BaseSyncClient):
             return status.manager_state in {"idle", "executing_queue"}
 
         return self.wait_for_condition(condition, timeout=timeout)
+
+    def login(
+        self, user_name: str, password: str, *, expiration_time: int | float | None = None
+    ) -> SuccessfulLoginResponse:
+        """
+        Provide user credentials for acquiring permissions on the remote resources.
+
+        This method already transparently configures this client with the tokens in case
+        of success, so subsequent method calls will automatically add the relevant authentication
+        information, and refresh the tokens when needed.
+
+        Parameters
+        ----------
+        user_name : str
+            Name of the user trying to log in.
+        password : str
+            Plaintext password for the given user.
+        expiration_time : int or float, optional
+            A custom expiration time for the returned access token. The server will cap this value
+            to the default expiration time configured on there, so only lower values are allowed.
+
+        Returns
+        -------
+        SuccessfulLoginResponse
+            The tokens and login information of the request.
+        """
+        return self._run_coroutine(self._client.login(user_name, password, expiration_time=expiration_time))
+
+    def logout(self):
+        """Revoke permissions of the currently configured authentication tokens."""
+        return self._run_coroutine(self._client.logout())
+
+    def refresh_session(self, *, expiration_time: int | float | None = None) -> SuccessfulLoginResponse:
+        """
+        Attempt to refresh the authentication tokens without user information.
+
+        Parameters
+        ----------
+        expiration_time : int or float, optional
+            A custom expiration time for the returned access token. The server will cap this value
+            to the default expiration time configured on there, so only lower values are allowed.
+
+        Returns
+        -------
+        SuccessfulLoginResponse
+            The new tokens and login information of the request.
+        """
+        return self._run_coroutine(self._client.refresh_session(expiration_time=expiration_time))
+
+    def whoami(self) -> UserInformation:
+        """Query information about the owner of the currently configured authentication token."""
+        return self._run_coroutine(self._client.whoami())

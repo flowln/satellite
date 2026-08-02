@@ -23,6 +23,7 @@ server = [
     "pyyaml",
     "redis[hiredis]",
     "pyjwt",
+    "ldap3",
 ]
 dev = [
     "anyio",

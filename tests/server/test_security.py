@@ -95,9 +95,9 @@ class TestAPIKeyAnonymousAccess:
         assert response.status_code == 200
 
 
-class TestDictionary:
-    @pytest.fixture(autouse=True)
-    def _configuration(self, tmp_path, monkeypatch):
+class TestAuthenticator:
+    @pytest.fixture
+    def configuration_dictionary(self, tmp_path, monkeypatch):
         configuration = ManagerConfiguration()
         configuration.network.use_mocked_backend = True
         provider = _ManagerAuthenticationProvider(
@@ -114,6 +114,39 @@ class TestDictionary:
 
         monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
 
+        yield
+
+    @pytest.fixture
+    def configuration_ldap(self, tmp_path, monkeypatch):
+        pytest.importorskip("ldap3")
+
+        configuration = ManagerConfiguration()
+        configuration.network.use_mocked_backend = True
+        provider = _ManagerAuthenticationProvider(
+            provider="test",
+            expiration_time=10.0,
+            authenticator="satellite.server.security.authenticators:LDAPAuthenticator",
+            args={
+                "server_address": "test_addr",
+                "server_port": 1234,
+                "bind_dn_template": "uid={username}",
+                "mock": True,
+                "mock_entries": (("ed", "123"), ("molly", "456")),
+            },
+        )
+        configuration.authentication.providers = [provider]
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as _file:
+            yaml.safe_dump(configuration.model_dump(), stream=_file)
+
+        monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
+
+        yield
+
+    @pytest.fixture(autouse=True, params=[configuration_dictionary, configuration_ldap])
+    def configuration(self, request):
+        request.getfixturevalue(request.param.__name__)
         yield
 
     async def test_with_configuration_block_request(self, client: httpx.AsyncClient):

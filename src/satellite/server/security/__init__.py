@@ -272,6 +272,8 @@ def _create_password_login_handler(
         override_refresh_expiration_time : int or float, optional
             Set a lower refresh expiration time than the provider's default. Cannot be higher than the default.
         """
+        global JWT_BLACKLIST
+
         if isinstance(token, str):
             logger.critical(
                 "Someone attempted to use an expired token to refresh the session. This can be indicative of an attack."
@@ -299,6 +301,9 @@ def _create_password_login_handler(
                 detail="This token has been revoked. This incident will be reported.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        # Invalidate this refresh token.
+        JWT_BLACKLIST[token[JWT_PROVIDER_CLAIM]].add(token["raw_token"])
 
         user_name = token["sub"]
         logger.info("Refreshing tokens for user '%s'.", user_name)

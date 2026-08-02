@@ -326,6 +326,12 @@ class TestAuthenticator:
         response = await client.get("/status", headers={"Authorization": f"Bearer {new_tokens.token}"})
         assert response.status_code == 200
 
+        # Assert the old refresh token doesn't work anymore
+        new_tokens_response = await client.post(
+            "/session_refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
+        )
+        assert new_tokens_response.status_code == 401
+
     async def test_with_configuration_whoami(self, client: httpx.AsyncClient):
         dependencies, _ = authenticate_dependencies()
         assert len(dependencies) == 1

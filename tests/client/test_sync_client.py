@@ -8,6 +8,7 @@ import yaml
 from satellite.client.client import OAuthAuthentication, SyncClient
 from satellite.models import ManagerStatus
 from satellite.server.configuration import ManagerConfiguration, _ManagerAuthenticationProvider
+from satellite.server.security.access_policies import BasicAPIAccessPolicy
 
 
 @pytest.fixture
@@ -88,6 +89,9 @@ def python_client_with_auth(monkeypatch, tmp_path):
         args={"users_to_passwords": {"ed": "123", "molly": "456"}},
     )
     configuration.authentication.providers = [provider]
+    configuration.authorization.api_access_authorization.args = {
+        "roles": BasicAPIAccessPolicy.get_roles_for_admin_power("ed", "molly")
+    }
 
     config_path = tmp_path / "config.yaml"
     with open(config_path, "w") as _file:

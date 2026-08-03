@@ -6,17 +6,38 @@ import os
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
-from fastapi.security import APIKeyHeader, APIKeyQuery, OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import APIKeyHeader, APIKeyQuery, OAuth2PasswordBearer, OAuth2PasswordRequestForm, SecurityScopes
 import jwt
 
 from ...models import SuccessfulLoginResponse, UserInformation
-from ..configuration import ManagerConfiguration, _ManagerAuthenticationProvider, load_manager_configuration
+from ..configuration import (
+    ManagerConfiguration,
+    _ManagerAPIAuthorizationPolicy,
+    _ManagerAuthenticationProvider,
+    load_manager_configuration,
+)
 
 logger = logging.getLogger("satellite.server.security")
 
-ANONYMOUS_USER_NAME = "unauthenticated_default"
+### Authorization
+
+API_SCOPES = {
+    "read:status": "Read access to the queue's current status.",
+    "read:queue": "Read access to the queue's queued items.",
+    "read:history": "Read access to the queue's items in history.",
+    "read:console": "Read access to the queue's console output.",
+    "write:manager:control": "Access to manager controls, like changing the environment state.",
+    "write:plan:control": "Access to controls of the running plan's execution.",
+    "write:queue:edit": "Write access to edit the queued items.",
+    "write:history:edit": "Write access to edit the items in the history.",
+}
+"""Available API scopes for controlling access to the server."""
+
+### Authentication
 
 # Single-user
+
+ANONYMOUS_USER_NAME = "unauthenticated_public"
 
 API_KEY_QUERY = APIKeyQuery(name="api-key", auto_error=False)
 API_KEY_HEADER = APIKeyHeader(name="x-api-key", auto_error=False)
@@ -31,11 +52,14 @@ JWT_REFRESH_CLAIM = "refresh"
 JWT_PROVIDER_CLAIM = "provider"
 JWT_SALT_CLAIM = "salt"
 """Used for providing uniqueness for each token, even if all parameters are equal."""
+JWT_API_SCOPES_CLAIM = "scopes"
 
 # TODO: Periodically clean up this. Any expired token can be removed from the blacklist.
 JWT_BLACKLIST: dict[str, set] = defaultdict(set)
 
-PASSWORD_SCHEME = OAuth2PasswordBearer(tokenUrl="login", refreshUrl="session_refresh", auto_error=False)
+PASSWORD_SCHEME = OAuth2PasswordBearer(
+    tokenUrl="login", refreshUrl="session_refresh", scopes=API_SCOPES, auto_error=False
+)
 
 
 def _get_configuration() -> ManagerConfiguration:
@@ -50,7 +74,6 @@ def _check_api_key(
     _secret_keys: Annotated[list[str] | None, Depends(_get_secret_keys)],
     api_key_query: Annotated[str, Security(API_KEY_QUERY)],
     api_key_header: Annotated[str, Security(API_KEY_HEADER)],
-    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
 ) -> bool:
     if _secret_keys is None:
         return False
@@ -60,14 +83,7 @@ def _check_api_key(
         return True
     if api_key_header in _secret_keys:
         return True
-
-    if configuration.authentication.allow_anonymous_access:
-        return False
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or missing API Key",
-    )
+    return False
 
 
 # Probably not exaustive. Ref.: https://datatracker.ietf.org/doc/html/rfc7519#section-4.1
@@ -89,31 +105,37 @@ def _get_access_token(username: str, expires_in: timedelta, claims: dict[JWT_CLA
     return encoded_jwt
 
 
-def _create_tokens_for_provider(
+def _create_tokens_for_providers(
     user_name: str,
-    provider: _ManagerAuthenticationProvider,
+    authentication_provider: _ManagerAuthenticationProvider,
+    api_authorizer: Any,
     override_expiration_time: int | float | None = None,
     override_refresh_expiration_time: int | float | None = None,
 ) -> tuple[str, int | float, str, int | float]:
     if override_expiration_time is None:
-        override_expiration_time = provider.expiration_time
+        override_expiration_time = authentication_provider.expiration_time
     else:
-        override_expiration_time = min(override_expiration_time, provider.expiration_time)
+        override_expiration_time = min(override_expiration_time, authentication_provider.expiration_time)
     expiration_time = timedelta(seconds=override_expiration_time)
 
     if override_refresh_expiration_time is None:
-        override_refresh_expiration_time = provider.refresh_expiration_time
+        override_refresh_expiration_time = authentication_provider.refresh_expiration_time
     else:
-        override_refresh_expiration_time = min(override_refresh_expiration_time, provider.refresh_expiration_time)
+        override_refresh_expiration_time = min(
+            override_refresh_expiration_time, authentication_provider.refresh_expiration_time
+        )
     refresh_expiration_time = timedelta(seconds=override_refresh_expiration_time)
+
+    api_scopes = api_authorizer.get_scopes_for_user(user_name)
 
     token = _get_access_token(
         user_name,
         expiration_time,
         {
             JWT_REFRESH_CLAIM: False,
-            JWT_PROVIDER_CLAIM: provider.provider_name,
+            JWT_PROVIDER_CLAIM: authentication_provider.provider_name,
             JWT_SALT_CLAIM: int.from_bytes(os.urandom(8)),
+            JWT_API_SCOPES_CLAIM: list(api_scopes),
         },
     )
     refresh_token = _get_access_token(
@@ -121,8 +143,9 @@ def _create_tokens_for_provider(
         refresh_expiration_time,
         {
             JWT_REFRESH_CLAIM: True,
-            JWT_PROVIDER_CLAIM: provider.provider_name,
+            JWT_PROVIDER_CLAIM: authentication_provider.provider_name,
             JWT_SALT_CLAIM: int.from_bytes(os.urandom(8)),
+            JWT_API_SCOPES_CLAIM: [],
         },
     )
 
@@ -130,9 +153,9 @@ def _create_tokens_for_provider(
 
 
 def _get_decoded_token(
-    token: Annotated[str, Depends(PASSWORD_SCHEME)],
+    token: Annotated[str | None, Depends(PASSWORD_SCHEME)],
     configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
-) -> dict[str, Any] | str:
+) -> dict[str, Any] | str | None:
     """
     Parse a raw token into its payload (claims).
 
@@ -157,6 +180,8 @@ def _get_decoded_token(
         If the token is invalid for some reason, and anonymous access is allowed, the reason for the
         token being invalid is returned.
     """
+    if token is None:
+        return
 
     def _raise_exception_if_needed(extra_msg: str, previous_exc: Exception | None = None):
         if not configuration.authentication.allow_anonymous_access:
@@ -201,11 +226,16 @@ def _get_provider_by_name(provider_name: str, configuration: ManagerConfiguratio
 
 def _create_password_login_handler(
     router: APIRouter,
-    provider: _ManagerAuthenticationProvider,
+    authentication_provider: _ManagerAuthenticationProvider,
+    authorization_provider: _ManagerAPIAuthorizationPolicy,
 ) -> APIRouter:
-    module_path, class_name = provider.authenticator.split(":")
+    module_path, class_name = authentication_provider.authenticator.split(":")
     authenticator_cls = getattr(importlib.import_module(module_path), class_name)
-    authenticator = authenticator_cls(**provider.args)
+    authenticator = authenticator_cls(**authentication_provider.args)
+
+    module_path, class_name = authorization_provider.policy_name.split(":")
+    authorizer_cls = getattr(importlib.import_module(module_path), class_name)
+    authorizer = authorizer_cls(**authorization_provider.args)
 
     @router.post("/login")
     async def login(
@@ -231,8 +261,8 @@ def _create_password_login_handler(
         if not authenticator.authenticate_with_password(username, password):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect username or password")
 
-        token, token_expires_in, refresh_token, _ = _create_tokens_for_provider(
-            username, provider, override_expiration_time, override_refresh_expiration_time
+        token, token_expires_in, refresh_token, _ = _create_tokens_for_providers(
+            username, authentication_provider, authorizer, override_expiration_time, override_refresh_expiration_time
         )
 
         return SuccessfulLoginResponse(
@@ -308,8 +338,8 @@ def _create_password_login_handler(
         user_name = token["sub"]
         logger.info("Refreshing tokens for user '%s'.", user_name)
 
-        token, token_expires_in, refresh_token, _ = _create_tokens_for_provider(
-            user_name, provider, override_expiration_time, override_refresh_expiration_time
+        token, token_expires_in, refresh_token, _ = _create_tokens_for_providers(
+            user_name, authentication_provider, authorizer, override_expiration_time, override_refresh_expiration_time
         )
         return SuccessfulLoginResponse(
             token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
@@ -318,23 +348,43 @@ def _create_password_login_handler(
     @router.get("/whoami")
     async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
         """Query information about the user authenticated with the used token."""
-        return UserInformation(user_name=current_user)
+        scopes_for_user = list(authorizer.get_scopes_for_user(current_user))
+        return UserInformation(user_name=current_user, scopes=scopes_for_user)
 
     return router
 
 
 def get_current_user(
-    token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)],
+    has_valid_api_key: Annotated[bool, Depends(_check_api_key)],
+    token: Annotated[dict[str, Any] | str | None, Depends(_get_decoded_token)],
+    security_scopes: SecurityScopes,
+    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
 ) -> str:
     """FastAPI Dependency for validating a token and returning the user of that token."""
-    if isinstance(token, str):
+    if security_scopes:
+        auth_error_headers = {"WWW-Authenticate": f'Bearer scope="{security_scopes.scope_str}"'}
+    else:
+        auth_error_headers = {"WWW-Authenticate": "Bearer"}
+
+    if has_valid_api_key:
         return ANONYMOUS_USER_NAME
+
+    # NOTE: str -> invalid token, None -> no token provided
+    if isinstance(token, (str, type(None))):
+        if configuration.authentication.allow_anonymous_access:
+            return ANONYMOUS_USER_NAME
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated.",
+            headers=auth_error_headers,
+        )
 
     if token.get(JWT_REFRESH_CLAIM, False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot use a refresh token for accessing resources.",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers=auth_error_headers,
         )
 
     provider_name = token[JWT_PROVIDER_CLAIM]
@@ -344,16 +394,23 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="This token has been revoked. This incident will be reported.",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers=auth_error_headers,
         )
 
-    username = token["sub"]
-    return username
+    token_scopes = token.get(JWT_API_SCOPES_CLAIM, set())
+    if any(scope not in token_scopes for scope in security_scopes.scopes):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not enough permissions to access this endpoint.",
+            headers=auth_error_headers,
+        )
+
+    return token["sub"]
 
 
-def authenticate_dependencies() -> tuple[list, APIRouter]:
+def authenticate_dependencies() -> APIRouter:
     """
-    Return a list of available authentication methods, along with a APIRouter with authentication-specific endpoints.
+    Return an APIRouter with authentication-specific endpoints.
 
     The basic implementation consists of a set of dependencies, that automatically validate headers and query parameters
     of endpoints for the needed authentication, and the API routes that allow the user to interact with that
@@ -365,12 +422,10 @@ def authenticate_dependencies() -> tuple[list, APIRouter]:
     configuration = _get_configuration()
 
     router = APIRouter()
-    dependencies = []
 
     _keys = configuration.authentication.secret_keys
     if _keys is not None and any(len(x) != 0 for x in _keys):
         logger.debug("Using API Key authentication.")
-        dependencies.append(Security(_check_api_key))
 
     if configuration.authentication.providers is not None:
         if len(configuration.authentication.providers) > 1:
@@ -379,13 +434,11 @@ def authenticate_dependencies() -> tuple[list, APIRouter]:
         for provider in configuration.authentication.providers:
             if provider.mode == "password":
                 logger.debug("Using token-based authentication via password.")
-                dependencies.append(Security(get_current_user))
 
-                router = _create_password_login_handler(router, provider)
+                router = _create_password_login_handler(
+                    router, provider, configuration.authorization.api_access_authorization
+                )
 
             break
 
-    if len(dependencies) == 0:
-        logger.warning("No authentication method has been set up.")
-
-    return dependencies, router
+    return router

@@ -46,6 +46,9 @@ class UserInformation(BaseModel):
 
     user_name: str
 
+    scopes: Sequence[str] = Field(default=[])
+    """API privileges this user has access to."""
+
 
 type ManagerState = Literal["idle", "creating_environment", "closing_environment", "executing_queue", "paused"]
 

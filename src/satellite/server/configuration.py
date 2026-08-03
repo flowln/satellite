@@ -90,6 +90,70 @@ class _ManagerAuthenticationSection(BaseModel):
     """List of authentication providers to use."""
 
 
+class _ManagerAPIAuthorizationPolicy(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    policy_name: str = Field(alias="policy", default="satellite.server.security.access_policies:BasicAPIAccessPolicy")
+    """Python class path of the access policy to use."""
+
+    args: dict[str, Any] = Field(default={})
+    """Extra arguments to send to the access policy at instance creation."""
+
+    @field_validator("policy_name")
+    @classmethod
+    def validate_policy_name(cls, value) -> str:
+        from importlib.util import find_spec
+
+        try:
+            module_path = str(value).split(":")[0]
+            if find_spec(module_path) is None:
+                raise ValueError(f"Couldn't find module at '{module_path}'.")
+        except Exception as exc:
+            raise ValueError(f"Failed to parse '{repr(value)}' as a python class path.") from exc
+
+        return value
+
+
+class _ManagerResourceAuthorizationPolicy(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    policy_name: str = Field(
+        alias="policy", default="satellite.server.security.access_policies:BasicResourceAccessPolicy"
+    )
+    """Python class path of the access policy to use."""
+
+    args: dict[str, Any] = Field(default={})
+    """Extra arguments to send to the access policy at instance creation."""
+
+    @field_validator("policy_name")
+    @classmethod
+    def validate_policy_name(cls, value) -> str:
+        from importlib.util import find_spec
+
+        try:
+            module_path = str(value).split(":")[0]
+            if find_spec(module_path) is None:
+                raise ValueError(f"Couldn't find module at '{module_path}'.")
+        except Exception as exc:
+            raise ValueError(f"Failed to parse '{repr(value)}' as a python class path.") from exc
+
+        return value
+
+
+class _ManagerAuthorizationSection(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True, extra="ignore")
+
+    api_access_authorization: _ManagerAPIAuthorizationPolicy = Field(
+        alias="api_access", default=_ManagerAPIAuthorizationPolicy()
+    )
+    """Access control policy for access of API endpoints."""
+
+    resource_access_authorization: _ManagerResourceAuthorizationPolicy = Field(
+        alias="resource_access", default=_ManagerResourceAuthorizationPolicy()
+    )
+    """Access control policy for access of server resources."""
+
+
 class _ManagerNetworkSection(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore")
 
@@ -142,6 +206,8 @@ class ManagerConfiguration(BaseModel):
 
     authentication: _ManagerAuthenticationSection = Field(default=_ManagerAuthenticationSection())
     """Default 'authentication' section for all managers."""
+    authorization: _ManagerAuthorizationSection = Field(default=_ManagerAuthorizationSection())
+    """Default 'authorization' section for all managers."""
     network: _ManagerNetworkSection = Field(default=_ManagerNetworkSection())
     """Default 'network' section for all managers."""
     operation: _ManagerOperationSection = Field(default=_ManagerOperationSection())

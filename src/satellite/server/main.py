@@ -3,7 +3,7 @@ import logging.config
 from typing import Any
 
 import click
-from fastapi import FastAPI
+from fastapi import FastAPI, Security
 from fastapi.openapi.utils import get_openapi
 
 from satellite.server.console import (
@@ -17,7 +17,7 @@ from .configuration import (
     parse_cli_arguments,
 )
 from .queue_manager import QueueManager
-from .security import authenticate_dependencies
+from .security import authenticate_dependencies, get_current_user
 
 
 def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
@@ -93,7 +93,7 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
             },
         )
 
-    require_authentication, router = authenticate_dependencies()
+    router = authenticate_dependencies()
     app = FastAPI(openapi_tags=openapi_tags)
     app.include_router(router, tags=["Security"])
 
@@ -120,9 +120,11 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
         manager = QueueManager(manager_name, configuration)
         router = manager.get_router()
 
-        app.include_router(router, tags=[manager_name], prefix=f"/{manager_name}", dependencies=require_authentication)
+        app.include_router(
+            router, tags=[manager_name], prefix=f"/{manager_name}", dependencies=[Security(get_current_user)]
+        )
         if manager_name == manager_config.primary_manager:
-            app.include_router(router, dependencies=require_authentication)
+            app.include_router(router, dependencies=[Security(get_current_user)])
 
     def _process_openapi_descriptions() -> dict[str, Any]:
         """Convert NumpyDoc-style endpoint descriptions into Markdown, so Swagger and Redoc can render it."""

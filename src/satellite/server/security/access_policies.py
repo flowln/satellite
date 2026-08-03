@@ -45,7 +45,7 @@ class BasicAPIAccessPolicy:
         return self._roles.get(user_name, set())
 
     @classmethod
-    def get_roles_for_admin_power(cls, *users: *str) -> BasicAPIRolesType:
+    def get_roles_for_admin_power(cls, *users: *tuple[str]) -> BasicAPIRolesType:
         """Return an argument to BasicAPIAccessPolicy in which all provided users have all permissions."""
         return {user: {"scopes_set": list(API_SCOPES.keys())} for user in users}
 

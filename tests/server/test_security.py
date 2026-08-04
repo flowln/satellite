@@ -419,7 +419,49 @@ class TestAuthorization:
 
         yield
 
-    @pytest.fixture(autouse=True, params=[basic_configuration, dictionary_configuration])
+    @pytest.fixture
+    def external_server_configuration(self, tmp_path, monkeypatch):
+        configuration = ManagerConfiguration()
+        configuration.network.use_mocked_backend = True
+        provider = _ManagerAuthenticationProvider(
+            provider="test",
+            expiration_time=10.0,
+            authenticator="satellite.server.security.authenticators:LDAPAuthenticator",
+            args={
+                "server_address": "test_addr",
+                "server_port": 1234,
+                "bind_dn_template": "uid={username}",
+                "mock": True,
+                "mock_entries": (("ed", "123"), ("molly", "456"), ("sophie", "789")),
+            },
+        )
+        configuration.authentication.providers = [provider]
+        configuration.authorization.api_access_authorization.policy_name = (
+            "satellite.server.security.access_policies:ServerBasedAPIAccessPolicy"
+        )
+        configuration.authorization.api_access_authorization.args = {
+            "base_url": "http://localhost",
+            "roles": {"status": {"scopes_add": ["read:status"]}, "history": {"scopes_add": ["read:history"]}},
+            "mock_responses": {
+                "/instrument/bon/qserver/access": {
+                    "status": {"ed": {}, "sophie": {}},
+                    "history": {"molly": {"email": "molly@thewaltens.com"}},
+                    "expert": {"sophie": {"displayed_name": "Sophie Walten"}},
+                    "admin": {"sophie": {}},
+                }
+            },
+            "instrument": "bon",
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as _file:
+            yaml.safe_dump(configuration.model_dump(), stream=_file)
+
+        monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
+
+        yield
+
+    @pytest.fixture(autouse=True, params=[basic_configuration, dictionary_configuration, external_server_configuration])
     def configuration(self, request):
         yield request.getfixturevalue(request.param.__name__)
 

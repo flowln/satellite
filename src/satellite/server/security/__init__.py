@@ -12,7 +12,6 @@ import jwt
 from ...models import SuccessfulLoginResponse, UserInformation
 from ..configuration import (
     ManagerConfiguration,
-    _ManagerAPIAuthorizationPolicy,
     _ManagerAuthenticationProvider,
     load_manager_configuration,
 )
@@ -227,15 +226,11 @@ def _get_provider_by_name(provider_name: str, configuration: ManagerConfiguratio
 def _create_password_login_handler(
     router: APIRouter,
     authentication_provider: _ManagerAuthenticationProvider,
-    authorization_provider: _ManagerAPIAuthorizationPolicy,
+    api_authorizer,
 ) -> APIRouter:
     module_path, class_name = authentication_provider.authenticator.split(":")
     authenticator_cls = getattr(importlib.import_module(module_path), class_name)
     authenticator = authenticator_cls(**authentication_provider.args)
-
-    module_path, class_name = authorization_provider.policy_name.split(":")
-    authorizer_cls = getattr(importlib.import_module(module_path), class_name)
-    authorizer = authorizer_cls(**authorization_provider.args)
 
     @router.post("/login")
     async def login(
@@ -262,7 +257,11 @@ def _create_password_login_handler(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect username or password")
 
         token, token_expires_in, refresh_token, _ = _create_tokens_for_providers(
-            username, authentication_provider, authorizer, override_expiration_time, override_refresh_expiration_time
+            username,
+            authentication_provider,
+            api_authorizer,
+            override_expiration_time,
+            override_refresh_expiration_time,
         )
 
         return SuccessfulLoginResponse(
@@ -339,17 +338,15 @@ def _create_password_login_handler(
         logger.info("Refreshing tokens for user '%s'.", user_name)
 
         token, token_expires_in, refresh_token, _ = _create_tokens_for_providers(
-            user_name, authentication_provider, authorizer, override_expiration_time, override_refresh_expiration_time
+            user_name,
+            authentication_provider,
+            api_authorizer,
+            override_expiration_time,
+            override_refresh_expiration_time,
         )
         return SuccessfulLoginResponse(
             token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
         )
-
-    @router.get("/whoami")
-    async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
-        """Query information about the user authenticated with the used token."""
-        scopes_for_user = list(authorizer.get_scopes_for_user(current_user))
-        return UserInformation(user_name=current_user, scopes=scopes_for_user)
 
     return router
 
@@ -366,11 +363,11 @@ def get_current_user(
     else:
         auth_error_headers = {"WWW-Authenticate": "Bearer"}
 
-    if has_valid_api_key:
-        return ANONYMOUS_USER_NAME
-
     # NOTE: str -> invalid token, None -> no token provided
     if isinstance(token, (str, type(None))):
+        if has_valid_api_key:
+            return ANONYMOUS_USER_NAME
+
         if configuration.authentication.allow_anonymous_access:
             return ANONYMOUS_USER_NAME
 
@@ -423,6 +420,11 @@ def authenticate_dependencies() -> APIRouter:
 
     router = APIRouter()
 
+    api_authorization_provider = configuration.authorization.api_access_authorization
+    module_path, class_name = api_authorization_provider.policy_name.split(":")
+    api_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
+    api_authorizer = api_authorizer_cls(**api_authorization_provider.args)
+
     _keys = configuration.authentication.secret_keys
     if _keys is not None and any(len(x) != 0 for x in _keys):
         logger.debug("Using API Key authentication.")
@@ -436,9 +438,17 @@ def authenticate_dependencies() -> APIRouter:
                 logger.debug("Using token-based authentication via password.")
 
                 router = _create_password_login_handler(
-                    router, provider, configuration.authorization.api_access_authorization
+                    router,
+                    provider,
+                    api_authorizer,
                 )
 
             break
+
+    @router.get("/whoami")
+    async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
+        """Query information about the user authenticated with the used token."""
+        scopes_for_user = list(api_authorizer.get_scopes_for_user(current_user))
+        return UserInformation(user_name=current_user, scopes=scopes_for_user)
 
     return router

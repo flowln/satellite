@@ -348,7 +348,7 @@ class TestDictionaryAnonymousAccess:
         assert parsed_response.user_name == ANONYMOUS_USER_NAME
 
 
-class TestAuthorization:
+class TestAPIAuthorization:
     @pytest.fixture
     def basic_configuration(self, tmp_path, monkeypatch):
         configuration = ManagerConfiguration()
@@ -538,3 +538,85 @@ class TestAuthorization:
             "/history_get", headers={"Authorization": f"Bearer {parsed_sophie_response.token}"}
         )
         assert sophie_response.status_code == 200, sophie_response.json()
+
+
+class TestResourceAuthorization:
+    @pytest.fixture
+    def basic_configuration(self, tmp_path, monkeypatch):
+        configuration = ManagerConfiguration()
+        configuration.network.use_mocked_backend = True
+        configuration.authentication.allow_anonymous_access = True
+        provider = _ManagerAuthenticationProvider(
+            provider="test",
+            expiration_time=10.0,
+            authenticator="satellite.server.security.authenticators:LDAPAuthenticator",
+            args={
+                "server_address": "test_addr",
+                "server_port": 1234,
+                "bind_dn_template": "uid={username}",
+                "mock": True,
+                "mock_entries": (("ed", "123"), ("molly", "456"), ("sophie", "789")),
+            },
+        )
+        configuration.authentication.providers = [provider]
+        configuration.authorization.resource_access_authorization.args = {
+            "groups": {
+                "ed": "primary",
+                "molly": "special",
+            },
+            "default_group": "primary",
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as _file:
+            yaml.safe_dump(configuration.model_dump(), stream=_file)
+
+        monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
+
+        yield
+
+    @pytest.fixture(autouse=True, params=[basic_configuration])
+    def configuration(self, request):
+        yield request.getfixturevalue(request.param.__name__)
+
+    async def test_whoami(self, client: httpx.AsyncClient):
+        _response = await client.post("/login", data={"username": "ed", "password": "123"})
+        ed_token = SuccessfulLoginResponse.model_validate(_response.json()).token
+
+        ed_response = await client.get("/whoami", headers={"Authorization": f"Bearer {ed_token}"})
+        assert ed_response.status_code == 200, ed_response.json()
+
+        ed_parsed_response = UserInformation.model_validate(ed_response.json())
+
+        assert ed_parsed_response.user_name == "ed"
+        assert ed_parsed_response.user_group == "primary"
+
+        _response = await client.post("/login", data={"username": "molly", "password": "456"})
+        molly_token = SuccessfulLoginResponse.model_validate(_response.json()).token
+
+        molly_response = await client.get("/whoami", headers={"Authorization": f"Bearer {molly_token}"})
+        assert molly_response.status_code == 200, molly_response.json()
+
+        molly_parsed_response = UserInformation.model_validate(molly_response.json())
+
+        assert molly_parsed_response.user_name == "molly"
+        assert molly_parsed_response.user_group == "special"
+
+        _response = await client.post("/login", data={"username": "sophie", "password": "789"})
+        sophie_token = SuccessfulLoginResponse.model_validate(_response.json()).token
+
+        sophie_response = await client.get("/whoami", headers={"Authorization": f"Bearer {sophie_token}"})
+        assert sophie_response.status_code == 200, sophie_response.json()
+
+        sophie_parsed_response = UserInformation.model_validate(sophie_response.json())
+
+        assert sophie_parsed_response.user_name == "sophie"
+        assert sophie_parsed_response.user_group == "primary"
+
+        anonymous_response = await client.get("/whoami")
+        assert anonymous_response.status_code == 200, anonymous_response.json()
+
+        anonymous_parsed_response = UserInformation.model_validate(anonymous_response.json())
+
+        assert anonymous_parsed_response.user_name == ANONYMOUS_USER_NAME
+        assert anonymous_parsed_response.user_group == "primary"

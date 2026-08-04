@@ -425,6 +425,11 @@ def authenticate_dependencies() -> APIRouter:
     api_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
     api_authorizer = api_authorizer_cls(**api_authorization_provider.args)
 
+    resource_authorization_provider = configuration.authorization.resource_access_authorization
+    module_path, class_name = resource_authorization_provider.policy_name.split(":")
+    resource_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
+    resource_authorizer = resource_authorizer_cls(**resource_authorization_provider.args)
+
     _keys = configuration.authentication.secret_keys
     if _keys is not None and any(len(x) != 0 for x in _keys):
         logger.debug("Using API Key authentication.")
@@ -449,6 +454,7 @@ def authenticate_dependencies() -> APIRouter:
     async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
         """Query information about the user authenticated with the used token."""
         scopes_for_user = list(api_authorizer.get_scopes_for_user(current_user))
-        return UserInformation(user_name=current_user, scopes=scopes_for_user)
+        user_group = resource_authorizer.get_group_of_user(current_user)
+        return UserInformation(user_name=current_user, user_group=user_group, scopes=scopes_for_user)
 
     return router

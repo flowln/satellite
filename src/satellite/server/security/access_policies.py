@@ -301,11 +301,25 @@ class ResourceAccessPolicy:
         """Return whether the given user can access the specified resource."""
         raise NotImplementedError
 
+    @abstractmethod
+    def get_group_of_user(self, user_name: str) -> str:
+        """Return the group this user is a part of."""
+        raise NotImplementedError
 
-# TODO
-class BasicResourceAccessPolicy:
+
+class BasicResourceAccessPolicy(ResourceAccessPolicy):
     """Basic policy for resource access, enabling all accesses."""
+
+    def __init__(self, groups: dict[str, str] | None = None, *, default_group: str = "primary"):
+        super().__init__()
+
+        self._groups = groups or {}
+        self._default_group = default_group
 
     def get_scopes_for_user(self, user_name: str) -> set[str]:
         """Return whether the given user can access the specified resource."""
         return {"read:all", "write:all"}
+
+    def get_group_of_user(self, user_name: str) -> str:
+        """Return the group this user is a part of."""
+        return self._groups.get(user_name, self._default_group)

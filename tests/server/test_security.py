@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import os
 import time as ttime
 
 import httpx
@@ -191,7 +193,7 @@ class TestAuthenticator:
 
         jwt.decode(parsed_response.token, key=JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM], subject="ed")
 
-        parsed_response.token = parsed_response.token[:-1] + ("0" if parsed_response.token[-1] != "0" else "1")
+        parsed_response.token = parsed_response.token[:-8] + base64.urlsafe_b64encode(os.urandom(8)).decode()
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 401
 
@@ -346,9 +348,9 @@ class TestDictionaryAnonymousAccess:
         assert parsed_response.user_name == ANONYMOUS_USER_NAME
 
 
-class TestBasicAuthorization:
-    @pytest.fixture(autouse=True)
-    def _configuration(self, tmp_path, monkeypatch):
+class TestAuthorization:
+    @pytest.fixture
+    def basic_configuration(self, tmp_path, monkeypatch):
         configuration = ManagerConfiguration()
         configuration.network.use_mocked_backend = True
         provider = _ManagerAuthenticationProvider(
@@ -360,12 +362,16 @@ class TestBasicAuthorization:
                 "server_port": 1234,
                 "bind_dn_template": "uid={username}",
                 "mock": True,
-                "mock_entries": (("ed", "123"), ("molly", "456")),
+                "mock_entries": (("ed", "123"), ("molly", "456"), ("sophie", "789")),
             },
         )
         configuration.authentication.providers = [provider]
         configuration.authorization.api_access_authorization.args = {
-            "roles": {"ed": {"scopes_add": ["read:status"]}, "molly": {"scopes_add": ["read:history"]}}
+            "roles": {
+                "ed": {"scopes_add": ["read:status"]},
+                "molly": {"scopes_add": ["read:history"]},
+                "sophie": {"scopes_add": ["read:status", "read:history"]},
+            }
         }
 
         config_path = tmp_path / "config.yaml"
@@ -375,6 +381,47 @@ class TestBasicAuthorization:
         monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
 
         yield
+
+    @pytest.fixture
+    def dictionary_configuration(self, tmp_path, monkeypatch):
+        configuration = ManagerConfiguration()
+        configuration.network.use_mocked_backend = True
+        provider = _ManagerAuthenticationProvider(
+            provider="test",
+            expiration_time=10.0,
+            authenticator="satellite.server.security.authenticators:LDAPAuthenticator",
+            args={
+                "server_address": "test_addr",
+                "server_port": 1234,
+                "bind_dn_template": "uid={username}",
+                "mock": True,
+                "mock_entries": (("ed", "123"), ("molly", "456"), ("sophie", "789")),
+            },
+        )
+        configuration.authentication.providers = [provider]
+        configuration.authorization.api_access_authorization.policy_name = (
+            "satellite.server.security.access_policies:DictionaryAPIAccessPolicy"
+        )
+        configuration.authorization.api_access_authorization.args = {
+            "roles": {"status": {"scopes_add": ["read:status"]}, "history": {"scopes_add": ["read:history"]}},
+            "users": {
+                "ed": {"roles": ["status"]},
+                "molly": {"roles": ["history"], "email": "molly@thewaltens.com"},
+                "sophie": {"roles": ["admin", "expert"], "displayed_name": "Sophie Walten"},
+            },
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as _file:
+            yaml.safe_dump(configuration.model_dump(), stream=_file)
+
+        monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
+
+        yield
+
+    @pytest.fixture(autouse=True, params=[basic_configuration, dictionary_configuration])
+    def configuration(self, request):
+        yield request.getfixturevalue(request.param.__name__)
 
     async def test_whoami_with_scopes(self, client: httpx.AsyncClient):
         ed_response = await client.post("/login", data={"username": "ed", "password": "123"})
@@ -386,6 +433,11 @@ class TestBasicAuthorization:
         assert molly_response.status_code == 200, molly_response.json()
 
         parsed_molly_response = SuccessfulLoginResponse.model_validate(molly_response.json())
+
+        sophie_response = await client.post("/login", data={"username": "sophie", "password": "789"})
+        assert sophie_response.status_code == 200, sophie_response.json()
+
+        parsed_sophie_response = SuccessfulLoginResponse.model_validate(sophie_response.json())
 
         ed_response = await client.get("/whoami", headers={"Authorization": f"Bearer {parsed_ed_response.token}"})
         assert ed_response.status_code == 200, ed_response.json()
@@ -399,6 +451,15 @@ class TestBasicAuthorization:
         molly_whoami = UserInformation.model_validate(molly_response.json())
         assert molly_whoami.scopes == ["read:history"]
 
+        sophie_response = await client.get(
+            "/whoami", headers={"Authorization": f"Bearer {parsed_sophie_response.token}"}
+        )
+        assert sophie_response.status_code == 200, sophie_response.json()
+
+        sophie_whoami = UserInformation.model_validate(sophie_response.json())
+        assert "read:status" in sophie_whoami.scopes
+        assert "read:history" in sophie_whoami.scopes
+
     async def test_read_scope_validate(self, client: httpx.AsyncClient):
         ed_response = await client.post("/login", data={"username": "ed", "password": "123"})
         assert ed_response.status_code == 200, ed_response.json()
@@ -409,6 +470,11 @@ class TestBasicAuthorization:
         assert molly_response.status_code == 200, molly_response.json()
 
         parsed_molly_response = SuccessfulLoginResponse.model_validate(molly_response.json())
+
+        sophie_response = await client.post("/login", data={"username": "sophie", "password": "789"})
+        assert sophie_response.status_code == 200, sophie_response.json()
+
+        parsed_sophie_response = SuccessfulLoginResponse.model_validate(sophie_response.json())
 
         ed_response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_ed_response.token}"})
         assert ed_response.status_code == 200, ed_response.json()
@@ -421,3 +487,12 @@ class TestBasicAuthorization:
             "/history_get", headers={"Authorization": f"Bearer {parsed_molly_response.token}"}
         )
         assert molly_response.status_code == 200, molly_response.json()
+
+        sophie_response = await client.get(
+            "/status", headers={"Authorization": f"Bearer {parsed_sophie_response.token}"}
+        )
+        assert sophie_response.status_code == 200
+        sophie_response = await client.get(
+            "/history_get", headers={"Authorization": f"Bearer {parsed_sophie_response.token}"}
+        )
+        assert sophie_response.status_code == 200, sophie_response.json()

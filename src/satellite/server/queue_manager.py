@@ -9,7 +9,7 @@ import time
 from typing import Annotated, Any, Literal, cast, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter, Security
+from fastapi import APIRouter, Body, Security
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -1147,7 +1147,8 @@ class QueueManager:
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        ret = LatestConsoleResponse()
+        uid = (await self.get_console_output_uid()).uid
+        ret = LatestConsoleResponse(last_msg_uid=uid)
 
         log_centralizer = get_global_log_centralizer()
         return_lines = log_centralizer.lookup_queue(self._name, start=-lines)
@@ -1156,7 +1157,12 @@ class QueueManager:
         return ret
 
     @get_endpoint("/console_output_update", dependencies=[Security(get_current_user, scopes=["read:console"])])
-    async def get_console_output_from_uid(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    async def get_console_output_from_uid(
+        self,
+        last_msg_uid: UUID | None = None,
+        last_msg_uid_from_body: Annotated[str, Body(alias="last_msg_uid", embed=True)] = "",
+        lines: int = 200,
+    ) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -1167,7 +1173,13 @@ class QueueManager:
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        ret = LatestConsoleResponse()
+        if last_msg_uid is None:
+            if last_msg_uid_from_body is None or last_msg_uid_from_body == "":
+                return await self.get_console_output(lines=lines)
+            last_msg_uid = UUID(last_msg_uid_from_body)
+
+        uid = (await self.get_console_output_uid()).uid
+        ret = LatestConsoleResponse(last_msg_uid=uid)
 
         log_centralizer = get_global_log_centralizer()
         return_lines = log_centralizer.lookup_queue_by_uid(self._name, last_msg_uid, limit=lines)

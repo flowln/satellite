@@ -234,7 +234,10 @@ class QueueAddRemoveResponse(GenericResponse):
 class LatestConsoleResponse(GenericResponse):
     """Data returned by the 'console_output' API endpoint."""
 
-    lines: Sequence[str] = Field(default=[])
+    uid: UUID = Field(alias="last_msg_uid")
+    """Unique identifier for the current state of the console."""
+
+    lines: Sequence[str] = Field(alias="console_output_msgs", default=[])
     """Text lines of past console output."""
 
 

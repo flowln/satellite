@@ -246,3 +246,23 @@ class ConsoleUidResponse(GenericResponse):
 
     uid: UUID
     """Unique identifier for the current state of the console."""
+
+
+class AllowedPlansResponse(GenericResponse):
+    """Data returned by the '/plans/allowed' API endpoint."""
+
+    uid: UUID = Field(alias="plans_allowed_uid")
+    """Unique identifier for the current list of allowed plans."""
+
+    items: list[str] = Field(alias="plans_allowed", default=[])
+    """List of plan names allowed for the current user group."""
+
+
+class AllowedDevicesResponse(GenericResponse):
+    """Data returned by the '/devices/allowed' API endpoint."""
+
+    uid: UUID = Field(alias="devices_allowed_uid")
+    """Unique identifier for the current list of allowed devices."""
+
+    items: list[str] = Field(alias="devices_allowed", default=[])
+    """List of device names allowed for the current user group."""

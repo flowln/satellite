@@ -24,6 +24,8 @@ from ..annotations import (
     validate_plan,
 )
 from ..models import (
+    AllowedDevicesResponse,
+    AllowedPlansResponse,
     ConsoleUidResponse,
     GenericResponse,
     HistoryResponse,
@@ -1203,6 +1205,59 @@ class QueueManager:
         uid = log_centralizer.get_uid_for_queue(self._name)
 
         return ConsoleUidResponse(uid=uid)
+
+    @get_endpoint("/plans/allowed")
+    async def allowed_plans(
+        self, user_group: Annotated[str, Security(get_current_user_group, scopes=["read:queue"])]
+    ) -> AllowedPlansResponse:
+        """Retrieve a list of allowed plans for the current user."""
+        await self.check_environment_process()
+
+        ret = AllowedPlansResponse(plans_allowed_uid=self._status.plans_allowed_uid)
+
+        existing_plans = await self._persistence_backend.get_existing_plans()
+        if isinstance(existing_plans, dict):
+            existing_plan_names = list(existing_plans.keys())
+        elif isinstance(existing_plans, PlanAnnotation):
+            existing_plan_names = [existing_plans.plan_name]
+        else:
+            existing_plan_names = []
+
+        group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+        if user_group not in group_permissions:
+            ret.items = existing_plan_names
+
+            return ret
+
+        ret.items = list(filter(group_permissions[user_group].is_plan_allowed, existing_plan_names))
+        return ret
+
+    @get_endpoint("/devices/allowed")
+    async def allowed_devices(
+        self, user_group: Annotated[str, Security(get_current_user_group, scopes=["read:queue"])]
+    ) -> AllowedDevicesResponse:
+        """Retrieve a list of allowed devices for the current user."""
+        await self.check_environment_process()
+
+        ret = AllowedDevicesResponse(devices_allowed_uid=self._status.devices_allowed_uid)
+
+        existing_devices = await self._persistence_backend.get_existing_devices()
+        if isinstance(existing_devices, dict):
+            existing_device_names = list(existing_devices.keys())
+        elif isinstance(existing_devices, PlanAnnotation):
+            existing_device_names = [existing_devices.plan_name]
+        else:
+            existing_device_names = []
+
+        group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+        if user_group not in group_permissions:
+            ret.items = existing_device_names
+
+            return ret
+
+        # TODO: ret.items = list(filter(group_permissions[user_group].is_device_allowed, existing_device_names))
+        ret.items = existing_device_names
+        return ret
 
     def _on_exit(self):
         if self._environment_process_handle is not None and self._environment_process_handle.poll() is None:

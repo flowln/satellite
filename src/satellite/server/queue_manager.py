@@ -470,7 +470,7 @@ class QueueManager:
 
             await loop.run_in_executor(None, lambda: connection_loop.run_forever())
 
-    @post_endpoint("/environment_open", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/environment/open", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_open(self, lock_key: str | None = None) -> GenericResponse:
         """
         Open a new environment for plan execution.
@@ -526,7 +526,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/environment_close", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/environment/close", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_close(self, lock_key: str | None = None) -> GenericResponse:
         """
         Close the currently active environment.
@@ -554,7 +554,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/environment_destroy", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/environment/destroy", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_destroy(self, lock_key: str | None = None) -> GenericResponse:
         """
         Destroy the currently active environment, without cleaning up anything.
@@ -584,7 +584,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/history_get", dependencies=[Security(get_current_user, scopes=["read:history"])])
+    @get_endpoint("/history/get", dependencies=[Security(get_current_user, scopes=["read:history"])])
     async def history_get(self, limit: int | None = None, offset: int = 0) -> HistoryResponse:
         """
         Retrieve information about previously ran plans.
@@ -621,7 +621,7 @@ class QueueManager:
             msg=msg,
         )
 
-    @post_endpoint("/history_clear", dependencies=[Security(get_current_user, scopes=["write:history:edit"])])
+    @post_endpoint("/history/clear", dependencies=[Security(get_current_user, scopes=["write:history:edit"])])
     async def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
         ret = GenericResponse()
@@ -631,7 +631,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/queue_get", dependencies=[Security(get_current_user, scopes=["read:queue"])])
+    @get_endpoint("/queue/get", dependencies=[Security(get_current_user, scopes=["read:queue"])])
     async def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
         await self.check_environment_process()
@@ -640,7 +640,7 @@ class QueueManager:
         items_in_queue = [item.uid for item in queue if item.uid is not None]
         return QueueResponse(items=items_in_queue, plan_queue_uid=self._status.plan_queue_uid)
 
-    @post_endpoint("/queue_clear", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    @post_endpoint("/queue/clear", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_clear(self, lock_key: str | None = None) -> GenericResponse:
         """
         Remove all items currently in the queue.
@@ -660,7 +660,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_item_add")
+    @post_endpoint("/queue/item/add")
     async def queue_item_add(
         self,
         item: QueueItem,
@@ -791,7 +791,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_item_remove", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    @post_endpoint("/queue/item/remove", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_item_remove(
         self,
         pos: int | Literal["front", "back"] | None = None,
@@ -866,7 +866,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/queue/start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_start(
         self,
         lock_key: str | None = None,
@@ -892,7 +892,7 @@ class QueueManager:
 
         return new_ret
 
-    @post_endpoint("/queue_stop", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/queue/stop", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_stop(
         self,
         lock_key: str | None = None,
@@ -929,7 +929,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_stop_cancel", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/queue/stop/cancel", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_stop_cancel(
         self,
         lock_key: str | None = None,
@@ -958,7 +958,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_pause", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/pause", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_pause(
         self,
         option: Literal["immediate", "deferred"] = "deferred",
@@ -1003,7 +1003,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_resume", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/resume", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_resume(
         self,
         lock_key: str | None = None,
@@ -1037,7 +1037,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_stop", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/stop", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_stop(
         self,
         lock_key: str | None = None,
@@ -1071,7 +1071,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_abort", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/abort", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_abort(
         self,
         lock_key: str | None = None,
@@ -1105,7 +1105,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_halt", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/halt", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_halt(
         self,
         lock_key: str | None = None,

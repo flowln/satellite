@@ -203,7 +203,7 @@ class AsyncClient(BaseAsyncClient):
         SuccessfulLoginResponse
             The tokens and login information of the request.
         """
-        endpoint = "/login"
+        endpoint = "/auth/login"  # FIXME: Get the provider from somewhere and use that
         if expiration_time is not None:
             endpoint += f"?override_expiration_time={expiration_time}"
 
@@ -213,7 +213,7 @@ class AsyncClient(BaseAsyncClient):
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
 
         auth_handler = OAuthAuthentication(
-            parsed_response.token, parsed_response.refresh_token, self.base_url.join("/session_refresh")
+            parsed_response.token, parsed_response.refresh_token, self.base_url.join("/auth/session/refresh")
         )
 
         self.auth = auth_handler
@@ -230,10 +230,10 @@ class AsyncClient(BaseAsyncClient):
         access_token_header = current_auth.make_headers_for_token(current_auth.access_token)
         refresh_token_header = current_auth.make_headers_for_token(current_auth.refresh_token)
 
-        response = await self.post("/logout", headers=access_token_header)
+        response = await self.post("/auth/logout", headers=access_token_header)
         response.raise_for_status()
 
-        response = await self.post("/logout", headers=refresh_token_header)
+        response = await self.post("/auth/logout", headers=refresh_token_header)
         response.raise_for_status()
 
     async def refresh_session(self, *, expiration_time: int | float | None = None) -> SuccessfulLoginResponse:
@@ -258,7 +258,7 @@ class AsyncClient(BaseAsyncClient):
 
         refresh_token_header = current_auth.make_headers_for_token(current_auth.refresh_token)
 
-        endpoint = "/session_refresh"
+        endpoint = "auth/session/refresh"
         if expiration_time is not None:
             endpoint += f"?override_expiration_time={expiration_time}"
 

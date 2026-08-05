@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-05T17:18+00:00
-Git revision: 8488b4657fd0e158027a06ef0281389ebea92fe4
+Date: 2026-08-05T21:08+00:00
+Git revision: 3f7f66f5950dd7d1c5999b40367d11a79e6316b4
 """
 
 from abc import abstractmethod
@@ -18,6 +18,8 @@ from uuid import UUID
 import httpx
 
 from satellite.models import (
+    AllowedDevicesResponse,
+    AllowedPlansResponse,
     ConsoleUidResponse,
     GenericResponse,
     HistoryResponse,
@@ -91,7 +93,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        response = await self.post_implementation("/environment_open", lock_key=lock_key)
+        response = await self.post_implementation("/environment/open", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -106,7 +108,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        response = await self.post_implementation("/environment_close", lock_key=lock_key)
+        response = await self.post_implementation("/environment/close", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -124,7 +126,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        response = await self.post_implementation("/environment_destroy", lock_key=lock_key)
+        response = await self.post_implementation("/environment/destroy", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -143,21 +145,21 @@ class BaseAsyncClient(httpx.AsyncClient):
             starts at the newest entry, and goes up from there.
 
         """
-        response = await self.get_implementation("/history_get", limit=limit, offset=offset)
+        response = await self.get_implementation("/history/get", limit=limit, offset=offset)
         response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
     async def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
-        response = await self.post_implementation("/history_clear")
+        response = await self.post_implementation("/history/clear")
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
     async def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
-        response = await self.get_implementation("/queue_get")
+        response = await self.get_implementation("/queue/get")
         response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
@@ -171,7 +173,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_clear", lock_key=lock_key)
+        response = await self.post_implementation("/queue/clear", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -223,7 +225,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
         """
         response = await self.post_implementation(
-            "/queue_item_add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
+            "/queue/item/add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
         )
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
@@ -254,7 +256,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_item_remove", pos=pos, uid=uid, lock_key=lock_key)
+        response = await self.post_implementation("/queue/item/remove", pos=pos, uid=uid, lock_key=lock_key)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -268,7 +270,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_start", lock_key=lock_key)
+        response = await self.post_implementation("/queue/start", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -285,7 +287,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_stop", lock_key=lock_key)
+        response = await self.post_implementation("/queue/stop", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -302,7 +304,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_stop_cancel", lock_key=lock_key)
+        response = await self.post_implementation("/queue/stop/cancel", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -326,7 +328,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_pause", option=option, lock_key=lock_key)
+        response = await self.post_implementation("/re/pause", option=option, lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -340,7 +342,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_resume", lock_key=lock_key)
+        response = await self.post_implementation("/re/resume", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -354,7 +356,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_stop", lock_key=lock_key)
+        response = await self.post_implementation("/re/stop", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -368,7 +370,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_abort", lock_key=lock_key)
+        response = await self.post_implementation("/re/abort", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -382,7 +384,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_halt", lock_key=lock_key)
+        response = await self.post_implementation("/re/halt", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -401,7 +403,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
-    async def console_output_update(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    async def console_output_update(self, last_msg_uid: UUID | None = None, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -427,6 +429,20 @@ class BaseAsyncClient(httpx.AsyncClient):
         response = await self.get_implementation("/console_output/uid")
         response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
+        return ret
+
+    async def plans_allowed(self) -> AllowedPlansResponse:
+        """Retrieve a list of allowed plans for the current user."""
+        response = await self.get_implementation("/plans/allowed")
+        response.raise_for_status()
+        ret = AllowedPlansResponse.model_validate(response.json())
+        return ret
+
+    async def devices_allowed(self) -> AllowedDevicesResponse:
+        """Retrieve a list of allowed devices for the current user."""
+        response = await self.get_implementation("/devices/allowed")
+        response.raise_for_status()
+        ret = AllowedDevicesResponse.model_validate(response.json())
         return ret
 
 
@@ -494,7 +510,7 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        response = self.post_implementation("/environment_open", lock_key=lock_key)
+        response = self.post_implementation("/environment/open", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -509,7 +525,7 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        response = self.post_implementation("/environment_close", lock_key=lock_key)
+        response = self.post_implementation("/environment/close", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -527,7 +543,7 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        response = self.post_implementation("/environment_destroy", lock_key=lock_key)
+        response = self.post_implementation("/environment/destroy", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -546,21 +562,21 @@ class BaseSyncClient:
             starts at the newest entry, and goes up from there.
 
         """
-        response = self.get_implementation("/history_get", limit=limit, offset=offset)
+        response = self.get_implementation("/history/get", limit=limit, offset=offset)
         response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
     def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
-        response = self.post_implementation("/history_clear")
+        response = self.post_implementation("/history/clear")
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
     def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
-        response = self.get_implementation("/queue_get")
+        response = self.get_implementation("/queue/get")
         response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
@@ -574,7 +590,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_clear", lock_key=lock_key)
+        response = self.post_implementation("/queue/clear", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -626,7 +642,7 @@ class BaseSyncClient:
             The lock key currently being used.
         """
         response = self.post_implementation(
-            "/queue_item_add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
+            "/queue/item/add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
         )
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
@@ -657,7 +673,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_item_remove", pos=pos, uid=uid, lock_key=lock_key)
+        response = self.post_implementation("/queue/item/remove", pos=pos, uid=uid, lock_key=lock_key)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -671,7 +687,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_start", lock_key=lock_key)
+        response = self.post_implementation("/queue/start", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -688,7 +704,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_stop", lock_key=lock_key)
+        response = self.post_implementation("/queue/stop", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -705,7 +721,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_stop_cancel", lock_key=lock_key)
+        response = self.post_implementation("/queue/stop/cancel", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -729,7 +745,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_pause", option=option, lock_key=lock_key)
+        response = self.post_implementation("/re/pause", option=option, lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -743,7 +759,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_resume", lock_key=lock_key)
+        response = self.post_implementation("/re/resume", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -757,7 +773,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_stop", lock_key=lock_key)
+        response = self.post_implementation("/re/stop", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -771,7 +787,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_abort", lock_key=lock_key)
+        response = self.post_implementation("/re/abort", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -785,7 +801,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_halt", lock_key=lock_key)
+        response = self.post_implementation("/re/halt", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -804,7 +820,7 @@ class BaseSyncClient:
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
-    def console_output_update(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    def console_output_update(self, last_msg_uid: UUID | None = None, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -830,4 +846,18 @@ class BaseSyncClient:
         response = self.get_implementation("/console_output/uid")
         response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
+        return ret
+
+    def plans_allowed(self) -> AllowedPlansResponse:
+        """Retrieve a list of allowed plans for the current user."""
+        response = self.get_implementation("/plans/allowed")
+        response.raise_for_status()
+        ret = AllowedPlansResponse.model_validate(response.json())
+        return ret
+
+    def devices_allowed(self) -> AllowedDevicesResponse:
+        """Retrieve a list of allowed devices for the current user."""
+        response = self.get_implementation("/devices/allowed")
+        response.raise_for_status()
+        ret = AllowedDevicesResponse.model_validate(response.json())
         return ret

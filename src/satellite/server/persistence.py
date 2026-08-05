@@ -2,6 +2,7 @@ from abc import abstractmethod
 from collections.abc import Callable
 from functools import cached_property, wraps
 import json
+import logging
 from typing import Any, cast
 from uuid import UUID
 
@@ -11,6 +12,29 @@ from satellite.annotations import DeviceAnnotation, PlanAnnotation
 from satellite.models import HistoryItem, QueueItem
 
 from .configuration import ManagerConfiguration
+
+logger = logging.getLogger("satellite.server.persistence")
+
+
+class BackendConnectionError(ConnectionError):
+    """ConnectionError subclass for when a persistence backend failed to connect with a server."""
+
+
+def backend_to_http_exception(func: Callable):
+    """Decorator for transforming backend connection errors into HTTP exceptions."""
+
+    @wraps(func)
+    async def _wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except BackendConnectionError as exc:
+            logger.error("Failed to connect with the backend's server.", exc_info=exc.__context__)
+
+            from fastapi import HTTPException, status
+
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE) from None
+
+    return _wrapper
 
 
 class PersistenceBackend:
@@ -110,6 +134,7 @@ class PersistenceBackend:
     @abstractmethod
     async def _list_length(self, key: str) -> int: ...
 
+    @backend_to_http_exception
     async def queue_get(self, offset: int = 0, limit: int | None = None) -> list[QueueItem]:
         """
         Retrieve a subset of items currently on the queue.
@@ -125,6 +150,7 @@ class PersistenceBackend:
         raw_items = await self._list_get(key, offset, limit)
         return [QueueItem.model_validate(_i, by_alias=True) for _i in raw_items]
 
+    @backend_to_http_exception
     async def queue_get_item(self, index: int | None = None, uuid: UUID | str | None = None) -> tuple[int, QueueItem]:
         """
         Retrieve a single item from the queue.
@@ -145,6 +171,7 @@ class PersistenceBackend:
         idx, raw_item = await self._list_get_item(key, index, uuid)
         return idx, QueueItem.model_validate(raw_item, by_alias=True)
 
+    @backend_to_http_exception
     async def queue_insert_item(self, item: QueueItem, index: int | None = 0) -> bool:
         """
         Insert a new item on the queue.
@@ -160,6 +187,7 @@ class PersistenceBackend:
         key = self.full_key_prefix + self.key_separator() + self.QUEUE_KEY
         return await self._list_insert_item(key, item, index)
 
+    @backend_to_http_exception
     async def queue_pop_item(self, index: int = 0) -> QueueItem:
         """
         Remove an item from the queue.
@@ -173,16 +201,19 @@ class PersistenceBackend:
         raw_item = await self._list_pop_item(key, index)
         return QueueItem.model_validate(raw_item, by_alias=True)
 
+    @backend_to_http_exception
     async def queue_clear(self) -> bool:
         """Remove all items currently in the queue."""
         key = self.full_key_prefix + self.key_separator() + self.QUEUE_KEY
         return await self._list_clear(key)
 
+    @backend_to_http_exception
     async def queue_length(self) -> int:
         """Return the current amount of items in the queue."""
         key = self.full_key_prefix + self.key_separator() + self.QUEUE_KEY
         return await self._list_length(key)
 
+    @backend_to_http_exception
     async def history_get(self, offset: int = 0, limit: int | None = None) -> list[HistoryItem]:
         """
         Retrieve a subset of items currently on the history.
@@ -198,6 +229,7 @@ class PersistenceBackend:
         raw_items = await self._list_get(key, offset, limit)
         return [HistoryItem.model_validate(_i, by_alias=True) for _i in raw_items]
 
+    @backend_to_http_exception
     async def history_get_item(
         self, index: int | None = None, uuid: UUID | str | None = None
     ) -> tuple[int, HistoryItem]:
@@ -220,6 +252,7 @@ class PersistenceBackend:
         idx, raw_item = await self._list_get_item(key, index, uuid)
         return idx, HistoryItem.model_validate(raw_item, by_alias=True)
 
+    @backend_to_http_exception
     async def history_insert_item(self, item: HistoryItem, index: int | None = 0) -> bool:
         """
         Insert a new item on the history.
@@ -235,6 +268,7 @@ class PersistenceBackend:
         key = self.full_key_prefix + self.key_separator() + self.HISTORY_KEY
         return await self._list_insert_item(key, item, index)
 
+    @backend_to_http_exception
     async def history_pop_item(self, index: int = 0) -> HistoryItem:
         """
         Remove an item from the history.
@@ -248,11 +282,13 @@ class PersistenceBackend:
         raw_item = await self._list_pop_item(key, index)
         return HistoryItem.model_validate(raw_item, by_alias=True)
 
+    @backend_to_http_exception
     async def history_clear(self) -> bool:
         """Remove all items currently in the history."""
         key = self.full_key_prefix + self.key_separator() + self.HISTORY_KEY
         return await self._list_clear(key)
 
+    @backend_to_http_exception
     async def history_length(self) -> int:
         """Return the current amount of items in the history."""
         key = self.full_key_prefix + self.key_separator() + self.HISTORY_KEY
@@ -288,8 +324,9 @@ class RedisPersistenceBackend(PersistenceBackend):
             assert isinstance(mock_fake_server, (type(None), FakeServer))  # noqa
             self._client = FakeAsyncRedis(server=mock_fake_server)
 
-        from redis.exceptions import ResponseError
+        from redis.exceptions import ConnectionError, ResponseError
 
+        self.connection_error = ConnectionError
         self.response_error = ResponseError
 
         # NOTE: This storage is used to optimize usage of the '_ensure_initialized' method, by avoiding
@@ -328,7 +365,10 @@ class RedisPersistenceBackend(PersistenceBackend):
         if key in self._initialized_keys:
             return
 
-        await self._client.json().set(key, "$", default_factory(), nx=True)
+        try:
+            await self._client.json().set(key, "$", default_factory(), nx=True)
+        except self.connection_error as exc:
+            raise BackendConnectionError from exc
 
         self._initialized_keys.add(key)
 

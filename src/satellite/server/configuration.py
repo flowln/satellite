@@ -33,7 +33,7 @@ def parse_cli_arguments():
     for name, (arg_name, arg_desc, env_name) in _ARGUMENTS.items():
         parser.add_argument(arg_name, help=f"{arg_desc} (env: {env_name})", dest=name)
 
-    args = parser.parse_args()
+    args = parser.parse_known_args()[0]
 
     for argument_name, value in args.__dict__.items():
         if value is None:

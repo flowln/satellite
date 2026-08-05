@@ -210,6 +210,12 @@ class _ManagerNetworkSection(BaseModel):
     """Network address on which to find a live Redis instance."""
     redis_name_prefix: str = Field(default="qs_default", frozen=True)
     """String prepended to all keys used by satellite (default: qs_default)."""
+    redis_no_queue_name_in_key: bool = Field(default=False, frozen=True)
+    """
+    Do not append the queue name to the redis persistence key.
+
+    This breaks multi-queue setups, but allows for easier compatibility with queueserver.
+    """
 
 
 class _ManagerOperationSection(BaseModel):

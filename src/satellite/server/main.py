@@ -1,5 +1,6 @@
 import logging
 import logging.config
+import os
 from typing import Any
 
 import click
@@ -93,8 +94,10 @@ def _create_app(*, mock_arguments: dict[str, Any] | None = None) -> FastAPI:
             },
         )
 
+    api_prefix = os.environ.get("SATELLITE_API_PREFIX", "")
+
     router = authenticate_dependencies()
-    app = FastAPI(openapi_tags=openapi_tags)
+    app = FastAPI(root_path=api_prefix, openapi_tags=openapi_tags)
     app.include_router(router, tags=["Security"])
 
     @app.get("/", include_in_schema=False)

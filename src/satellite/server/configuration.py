@@ -17,7 +17,12 @@ _ARGUMENTS = {
         "--config",
         "Queue manager configuration file location",
         "QSERVER_CONFIG",
-    )
+    ),
+    "api-prefix": (
+        "--api-prefix",
+        "Prefix to add to all API endpoints.",
+        "SATELLITE_API_PREFIX",
+    ),
 }
 
 

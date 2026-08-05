@@ -602,7 +602,9 @@ class QueueManager:
         success = True
         msg = ""
 
-        if offset >= self._status.items_in_history:
+        # NOTE: If offset == 0, the user probably didn't change the default, so if the history
+        # is currently empty, the more intuitive response is to reply with the empty history.
+        if offset >= self._status.items_in_history and offset != 0:
             items_in_history = []
 
             success = False

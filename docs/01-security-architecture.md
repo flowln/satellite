@@ -73,3 +73,18 @@ and its value is a set of blacklisted tokens. This set is verified on every oper
 On the client side, the authentication feature of [`httpx`](https://www.python-httpx.org/advanced/authentication/) is used. In `client.py`, a `httpx.Auth` subclass
 is created to handle adding the proper HTTP headers for authentication. If an access token has expired, an attempt is made to refresh it using the refresh token,
 making the token handling transparent to the user.
+
+## Authorization
+
+For the authorization portion of security, there's a distinction made between **API access authorization** and **resource access authorization**.
+
+Preveing unauthorized access to API endpoints is made using the [OAuth2 scope mechanism](https://fastapi.tiangolo.com/advanced/security/oauth2-scopes/),
+easily made available by FastAPI. So, each endpoint has their required scopes declared when defining the endpoint itself, and these scopes are associated
+with the JWT authentication token (by adding the user scopes to the token itself as a claim) or the user of the API key. These user scopes are requested from
+the authorization providers, called **access policies**. Each policy has its own behavior for defining the scopes of each user, but all of them in essence do
+the same job: give the set of API access scopes a particular user has access to.
+
+In contrast, limiting resource access is more limited. Instead of attaching individual scopes for each user, for resource access we join users into groups,
+each of which will have certain permissions on individual resources. For each group, the default is to allow access to all resources, but you can add or remove
+access to specific ones either by using regular expressions, or by directly stating the name of the resource. This configuration is independent from the access
+policy, and resides in the `group_permissions` configuration option in the `authorization` section.

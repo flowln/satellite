@@ -8,8 +8,12 @@ import jwt
 import pytest
 import yaml
 
-from satellite.models import SuccessfulLoginResponse, UserInformation
-from satellite.server.configuration import ManagerConfiguration, _ManagerAuthenticationProvider
+from satellite.models import QueueItem, SuccessfulLoginResponse, UserInformation
+from satellite.server.configuration import (
+    ManagerConfiguration,
+    _ManagerAuthenticationProvider,
+    _ManagerResourceGroupPermissions,
+)
 from satellite.server.security import (
     ANONYMOUS_USER_NAME,
     JWT_ALGORITHM,
@@ -559,6 +563,17 @@ class TestResourceAuthorization:
             },
         )
         configuration.authentication.providers = [provider]
+        configuration.authorization.api_access_authorization.args = {
+            "roles": {
+                "ed": {"scopes_add": ["read:status", "write:queue:edit"]},
+                "molly": {"scopes_add": ["read:history", "write:queue:edit"]},
+                "sophie": {"scopes_add": ["read:status", "read:history", "write:queue:edit"]},
+            }
+        }
+        configuration.authorization.resource_access_authorization.group_permissions = {
+            "primary": _ManagerResourceGroupPermissions(forbidden_plans=(":^_.+",)),
+            "special": _ManagerResourceGroupPermissions(allowed_plans=(":^_.+",), forbidden_plans=("_prohibited",)),
+        }
         configuration.authorization.resource_access_authorization.args = {
             "groups": {
                 "ed": "primary",
@@ -579,10 +594,14 @@ class TestResourceAuthorization:
     def configuration(self, request):
         yield request.getfixturevalue(request.param.__name__)
 
-    async def test_whoami(self, client: httpx.AsyncClient):
-        _response = await client.post("/login", data={"username": "ed", "password": "123"})
-        ed_token = SuccessfulLoginResponse.model_validate(_response.json()).token
+    async def get_token(self, client: httpx.AsyncClient, username: str, password: str) -> str:
+        response = await client.post("/login", data={"username": username, "password": password})
+        assert response.status_code == 200, response.json()
 
+        return SuccessfulLoginResponse.model_validate(response.json()).token
+
+    async def test_whoami(self, client: httpx.AsyncClient):
+        ed_token = await self.get_token(client, "ed", "123")
         ed_response = await client.get("/whoami", headers={"Authorization": f"Bearer {ed_token}"})
         assert ed_response.status_code == 200, ed_response.json()
 
@@ -591,9 +610,7 @@ class TestResourceAuthorization:
         assert ed_parsed_response.user_name == "ed"
         assert ed_parsed_response.user_group == "primary"
 
-        _response = await client.post("/login", data={"username": "molly", "password": "456"})
-        molly_token = SuccessfulLoginResponse.model_validate(_response.json()).token
-
+        molly_token = await self.get_token(client, "molly", "456")
         molly_response = await client.get("/whoami", headers={"Authorization": f"Bearer {molly_token}"})
         assert molly_response.status_code == 200, molly_response.json()
 
@@ -602,9 +619,7 @@ class TestResourceAuthorization:
         assert molly_parsed_response.user_name == "molly"
         assert molly_parsed_response.user_group == "special"
 
-        _response = await client.post("/login", data={"username": "sophie", "password": "789"})
-        sophie_token = SuccessfulLoginResponse.model_validate(_response.json()).token
-
+        sophie_token = await self.get_token(client, "sophie", "789")
         sophie_response = await client.get("/whoami", headers={"Authorization": f"Bearer {sophie_token}"})
         assert sophie_response.status_code == 200, sophie_response.json()
 
@@ -620,3 +635,53 @@ class TestResourceAuthorization:
 
         assert anonymous_parsed_response.user_name == ANONYMOUS_USER_NAME
         assert anonymous_parsed_response.user_group == "primary"
+
+    async def test_allowed_plans_parsing(self, client: httpx.AsyncClient):
+        # NOTE: Here we assume that the authorization check is performed BEFORE any other validation.
+        # This should be the case since it gives the least amount of information to an unauthorized user.
+
+        ed_token = await self.get_token(client, "ed", "123")
+
+        item = QueueItem(name="simple_plan")
+        request_body = item.model_dump(mode="json")
+        response = await client.post(
+            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
+        )
+        assert "doesn't have access" not in response.json().get("msg", ""), response.json()
+
+        item = QueueItem(name="_some_other_plan")
+        request_body = item.model_dump(mode="json")
+        response = await client.post(
+            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
+        )
+        assert "doesn't have access" in response.json().get("msg", ""), response.json()
+
+        molly_token = await self.get_token(client, "molly", "456")
+
+        item = QueueItem(name="simple_plan")
+        request_body = item.model_dump(mode="json")
+        response = await client.post(
+            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+        )
+        assert "doesn't have access" in response.json().get("msg", ""), response.json()
+
+        item = QueueItem(name="_some_other_plan")
+        request_body = item.model_dump(mode="json")
+        response = await client.post(
+            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+        )
+        assert "doesn't have access" not in response.json().get("msg", ""), response.json()
+
+        item = QueueItem(name="_prohibited_123")
+        request_body = item.model_dump(mode="json")
+        response = await client.post(
+            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+        )
+        assert "doesn't have access" not in response.json().get("msg", ""), response.json()
+
+        item = QueueItem(name="_prohibited")
+        request_body = item.model_dump(mode="json")
+        response = await client.post(
+            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+        )
+        assert "doesn't have access" in response.json().get("msg", ""), response.json()

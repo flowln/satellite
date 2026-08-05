@@ -47,4 +47,4 @@ PASSWORD_SCHEME = OAuth2PasswordBearer(
 
 ### Reimports
 
-from .main import authenticate_dependencies, get_current_user  # noqa
+from .main import authenticate_dependencies, get_current_user, get_current_user_group  # noqa

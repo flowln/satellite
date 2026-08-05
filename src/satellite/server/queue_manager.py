@@ -6,7 +6,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Any, Literal, cast, no_type_check
+from typing import Annotated, Any, Literal, cast, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
 from fastapi import APIRouter, Security
@@ -15,6 +15,7 @@ from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
 from satellite.server.persistence import create_backend_for_configuration
 from satellite.server.security import get_current_user
+from satellite.server.security.main import get_current_user_group
 
 from ..annotations import (
     DeviceAnnotation,
@@ -655,15 +656,15 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_item_add", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    @post_endpoint("/queue_item_add")
     async def queue_item_add(
         self,
         item: QueueItem,
-        user_group: str = "primary",
-        user: str = "default",
         pos: int | Literal["front", "back"] = "back",
         before_uid: str | None = None,
         after_uid: str | None = None,
+        user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
         lock_key: str | None = None,
     ) -> QueueAddRemoveResponse:
         """
@@ -675,14 +676,6 @@ class QueueManager:
             The item to add to the queue.
 
             The 'item_uid' field is expected to be null, as it will be filled up after this call.
-        user_group : str, optional
-            The group associated with the user currently making the request. Defaults to 'primary'.
-
-            It is used for recording information in the item, so that it's easier to track later.
-        user : str, optional
-            The user making the request. Defaults to 'default'.
-
-            It is used for recording information in the item, so that it's easier to track later.
         pos : int, "back" or "front", optional
             The position in which to add this item in the queue.
 
@@ -701,6 +694,14 @@ class QueueManager:
             Insert the item after (i.e. executes afterwards) the item with the specified uid.
 
             This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
         lock_key : str, optional
             The lock key currently being used.
         """
@@ -711,6 +712,15 @@ class QueueManager:
 
         # Validate item
         if item.type == "plan":
+            group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+            if user_group in group_permissions and not group_permissions[user_group].is_plan_allowed(item.name):
+                ret.success = False
+                ret.msg = (
+                    "Failed to add item to queue:"
+                    f"The current user (group: '{user_group}') doesn't have access to plan '{item.name}'."
+                )
+                return ret
+
             annotation = await self._retrieve_annotation_for_plan(item)
 
             if annotation is None:

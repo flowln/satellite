@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import OAuth2PasswordRequestForm, SecurityScopes
 import jwt
 
-from satellite.server.security.access_policies import APIAccessPolicy
+from satellite.server.security.access_policies import APIAccessPolicy, ResourceAccessPolicy
 
 from ...models import SuccessfulLoginResponse, UserInformation
 from ..configuration import (
@@ -195,10 +195,27 @@ def _get_provider_by_name(provider_name: str, configuration: ManagerConfiguratio
     raise RuntimeError
 
 
+def _get_api_access_authorizer(
+    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
+) -> APIAccessPolicy:
+    api_authorization_provider = configuration.authorization.api_access_authorization
+    module_path, class_name = api_authorization_provider.policy_name.split(":")
+    api_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
+    return api_authorizer_cls(**api_authorization_provider.args)
+
+
+def _get_resource_access_authorizer(
+    configuration: Annotated[ManagerConfiguration, Depends(_get_configuration)],
+) -> ResourceAccessPolicy:
+    resource_authorization_provider = configuration.authorization.resource_access_authorization
+    module_path, class_name = resource_authorization_provider.policy_name.split(":")
+    resource_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
+    return resource_authorizer_cls(**resource_authorization_provider.args)
+
+
 def _create_password_login_handler(
     router: APIRouter,
     authentication_provider: _ManagerAuthenticationProvider,
-    api_authorizer: APIAccessPolicy,
 ) -> APIRouter:
     module_path, class_name = authentication_provider.authenticator.split(":")
     authenticator_cls = getattr(importlib.import_module(module_path), class_name)
@@ -207,6 +224,7 @@ def _create_password_login_handler(
     @router.post("/login")
     async def login(
         form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+        api_authorizer: Annotated[APIAccessPolicy, Depends(_get_api_access_authorizer)],
         override_expiration_time: int | float | None = None,
         override_refresh_expiration_time: int | float | None = None,
     ) -> SuccessfulLoginResponse:
@@ -258,6 +276,7 @@ def _create_password_login_handler(
     @router.post("/session_refresh")
     async def session_refresh(
         token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)],
+        api_authorizer: Annotated[APIAccessPolicy, Depends(_get_api_access_authorizer)],
         override_expiration_time: int | float | None = None,
         override_refresh_expiration_time: int | float | None = None,
     ) -> SuccessfulLoginResponse:
@@ -377,6 +396,14 @@ def get_current_user(
     return token["sub"]
 
 
+def get_current_user_group(
+    current_user: Annotated[str, Depends(get_current_user)],
+    resource_authorizer: Annotated[ResourceAccessPolicy, Depends(_get_resource_access_authorizer)],
+) -> str:
+    """FastAPI Dependency for querying the group associated with the current user."""
+    return resource_authorizer.get_group_of_user(current_user)
+
+
 def authenticate_dependencies() -> APIRouter:
     """
     Return an APIRouter with authentication-specific endpoints.
@@ -391,16 +418,6 @@ def authenticate_dependencies() -> APIRouter:
     configuration = _get_configuration()
 
     router = APIRouter()
-
-    api_authorization_provider = configuration.authorization.api_access_authorization
-    module_path, class_name = api_authorization_provider.policy_name.split(":")
-    api_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
-    api_authorizer = api_authorizer_cls(**api_authorization_provider.args)
-
-    resource_authorization_provider = configuration.authorization.resource_access_authorization
-    module_path, class_name = resource_authorization_provider.policy_name.split(":")
-    resource_authorizer_cls = getattr(importlib.import_module(module_path), class_name)
-    resource_authorizer = resource_authorizer_cls(**resource_authorization_provider.args)
 
     _keys = configuration.authentication.secret_keys
     if _keys is not None and any(len(x) != 0 for x in _keys):
@@ -417,16 +434,18 @@ def authenticate_dependencies() -> APIRouter:
                 router = _create_password_login_handler(
                     router,
                     provider,
-                    api_authorizer,
                 )
 
             break
 
     @router.get("/whoami")
-    async def whoami(current_user: Annotated[str, Depends(get_current_user)]) -> UserInformation:
+    async def whoami(
+        current_user: Annotated[str, Depends(get_current_user)],
+        current_user_group: Annotated[str, Depends(get_current_user_group)],
+        api_authorizer: Annotated[APIAccessPolicy, Depends(_get_api_access_authorizer)],
+    ) -> UserInformation:
         """Query information about the user authenticated with the used token."""
         scopes_for_user = list(api_authorizer.get_scopes_for_user(current_user))
-        user_group = resource_authorizer.get_group_of_user(current_user)
-        return UserInformation(user_name=current_user, user_group=user_group, scopes=scopes_for_user)
+        return UserInformation(user_name=current_user, user_group=current_user_group, scopes=scopes_for_user)
 
     return router

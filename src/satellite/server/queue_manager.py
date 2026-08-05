@@ -6,14 +6,16 @@ import logging
 import os
 import subprocess
 import time
-from typing import Any, Literal, cast, no_type_check
+from typing import Annotated, Any, Literal, cast, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Security
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
 from satellite.server.persistence import create_backend_for_configuration
+from satellite.server.security import get_current_user
+from satellite.server.security.main import get_current_user_group
 
 from ..annotations import (
     DeviceAnnotation,
@@ -434,7 +436,7 @@ class QueueManager:
         """Test connectivity with the queue manager. Always responds 'pong'."""
         return {"message": "pong"}
 
-    @get_endpoint("/status")
+    @get_endpoint("/status", dependencies=[Security(get_current_user, scopes=["read:status"])])
     async def status(self) -> ManagerStatus:
         """Retrieve the current state of the manager."""
         await self.check_environment_process()
@@ -466,7 +468,7 @@ class QueueManager:
 
             await loop.run_in_executor(None, lambda: connection_loop.run_forever())
 
-    @post_endpoint("/environment_open")
+    @post_endpoint("/environment_open", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_open(self, lock_key: str | None = None) -> GenericResponse:
         """
         Open a new environment for plan execution.
@@ -522,7 +524,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/environment_close")
+    @post_endpoint("/environment_close", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_close(self, lock_key: str | None = None) -> GenericResponse:
         """
         Close the currently active environment.
@@ -550,7 +552,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/environment_destroy")
+    @post_endpoint("/environment_destroy", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_destroy(self, lock_key: str | None = None) -> GenericResponse:
         """
         Destroy the currently active environment, without cleaning up anything.
@@ -580,7 +582,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/history_get")
+    @get_endpoint("/history_get", dependencies=[Security(get_current_user, scopes=["read:history"])])
     async def history_get(self, limit: int | None = None, offset: int = 0) -> HistoryResponse:
         """
         Retrieve information about previously ran plans.
@@ -615,7 +617,7 @@ class QueueManager:
             msg=msg,
         )
 
-    @post_endpoint("/history_clear")
+    @post_endpoint("/history_clear", dependencies=[Security(get_current_user, scopes=["write:history:edit"])])
     async def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
         ret = GenericResponse()
@@ -625,7 +627,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/queue_get")
+    @get_endpoint("/queue_get", dependencies=[Security(get_current_user, scopes=["read:queue"])])
     async def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
         await self.check_environment_process()
@@ -634,7 +636,7 @@ class QueueManager:
         items_in_queue = [item.uid for item in queue if item.uid is not None]
         return QueueResponse(items=items_in_queue, plan_queue_uid=self._status.plan_queue_uid)
 
-    @post_endpoint("/queue_clear")
+    @post_endpoint("/queue_clear", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_clear(self, lock_key: str | None = None) -> GenericResponse:
         """
         Remove all items currently in the queue.
@@ -658,11 +660,11 @@ class QueueManager:
     async def queue_item_add(
         self,
         item: QueueItem,
-        user_group: str = "primary",
-        user: str = "default",
         pos: int | Literal["front", "back"] = "back",
         before_uid: str | None = None,
         after_uid: str | None = None,
+        user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
         lock_key: str | None = None,
     ) -> QueueAddRemoveResponse:
         """
@@ -674,14 +676,6 @@ class QueueManager:
             The item to add to the queue.
 
             The 'item_uid' field is expected to be null, as it will be filled up after this call.
-        user_group : str, optional
-            The group associated with the user currently making the request. Defaults to 'primary'.
-
-            It is used for recording information in the item, so that it's easier to track later.
-        user : str, optional
-            The user making the request. Defaults to 'default'.
-
-            It is used for recording information in the item, so that it's easier to track later.
         pos : int, "back" or "front", optional
             The position in which to add this item in the queue.
 
@@ -700,6 +694,14 @@ class QueueManager:
             Insert the item after (i.e. executes afterwards) the item with the specified uid.
 
             This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
         lock_key : str, optional
             The lock key currently being used.
         """
@@ -710,6 +712,15 @@ class QueueManager:
 
         # Validate item
         if item.type == "plan":
+            group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+            if user_group in group_permissions and not group_permissions[user_group].is_plan_allowed(item.name):
+                ret.success = False
+                ret.msg = (
+                    "Failed to add item to queue:"
+                    f"The current user (group: '{user_group}') doesn't have access to plan '{item.name}'."
+                )
+                return ret
+
             annotation = await self._retrieve_annotation_for_plan(item)
 
             if annotation is None:
@@ -776,7 +787,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_item_remove")
+    @post_endpoint("/queue_item_remove", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_item_remove(
         self,
         pos: int | Literal["front", "back"] | None = None,
@@ -851,7 +862,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_start")
+    @post_endpoint("/queue_start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_start(
         self,
         lock_key: str | None = None,
@@ -877,7 +888,7 @@ class QueueManager:
 
         return new_ret
 
-    @post_endpoint("/queue_stop")
+    @post_endpoint("/queue_stop", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_stop(
         self,
         lock_key: str | None = None,
@@ -914,7 +925,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_stop_cancel")
+    @post_endpoint("/queue_stop_cancel", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_stop_cancel(
         self,
         lock_key: str | None = None,
@@ -943,7 +954,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_pause")
+    @post_endpoint("/re_pause", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_pause(
         self,
         option: Literal["immediate", "deferred"] = "deferred",
@@ -988,7 +999,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_resume")
+    @post_endpoint("/re_resume", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_resume(
         self,
         lock_key: str | None = None,
@@ -1022,7 +1033,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_stop")
+    @post_endpoint("/re_stop", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_stop(
         self,
         lock_key: str | None = None,
@@ -1056,7 +1067,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_abort")
+    @post_endpoint("/re_abort", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_abort(
         self,
         lock_key: str | None = None,
@@ -1090,7 +1101,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_halt")
+    @post_endpoint("/re_halt", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_halt(
         self,
         lock_key: str | None = None,
@@ -1124,7 +1135,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/console_output")
+    @get_endpoint("/console_output", dependencies=[Security(get_current_user, scopes=["read:console"])])
     async def get_console_output(self, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output.
@@ -1142,7 +1153,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/console_output_update")
+    @get_endpoint("/console_output_update", dependencies=[Security(get_current_user, scopes=["read:console"])])
     async def get_console_output_from_uid(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
@@ -1166,7 +1177,7 @@ class QueueManager:
         ret.lines = return_lines
         return ret
 
-    @get_endpoint("/console_output/uid")
+    @get_endpoint("/console_output/uid", dependencies=[Security(get_current_user, scopes=["read:console"])])
     async def get_console_output_uid(self) -> ConsoleUidResponse:
         """
         Get a unique identifier for the current state of the console output.

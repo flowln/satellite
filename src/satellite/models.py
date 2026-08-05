@@ -45,6 +45,13 @@ class UserInformation(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
 
     user_name: str
+    """Name of the current user."""
+
+    user_group: str
+    """Group the user currently belongs in."""
+
+    scopes: Sequence[str] = Field(default=[])
+    """API privileges this user has access to."""
 
 
 type ManagerState = Literal["idle", "creating_environment", "closing_environment", "executing_queue", "paused"]

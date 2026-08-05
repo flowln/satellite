@@ -1,3 +1,6 @@
+authentication:
+  allow_anonymous_access: true
+
 network:
   use_mocked_backend: true
 

@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from collections.abc import Sequence
 import logging
 import os
 from pathlib import Path
@@ -90,6 +91,110 @@ class _ManagerAuthenticationSection(BaseModel):
     """List of authentication providers to use."""
 
 
+class _ManagerAPIAuthorizationPolicy(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    policy_name: str = Field(alias="policy", default="satellite.server.security.access_policies:BasicAPIAccessPolicy")
+    """Python class path of the access policy to use."""
+
+    args: dict[str, Any] = Field(default={})
+    """Extra arguments to send to the access policy at instance creation."""
+
+    @field_validator("policy_name")
+    @classmethod
+    def validate_policy_name(cls, value) -> str:
+        from importlib.util import find_spec
+
+        try:
+            module_path = str(value).split(":")[0]
+            if find_spec(module_path) is None:
+                raise ValueError(f"Couldn't find module at '{module_path}'.")
+        except Exception as exc:
+            raise ValueError(f"Failed to parse '{repr(value)}' as a python class path.") from exc
+
+        return value
+
+
+class _ManagerResourceGroupPermissions(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    allowed_plans: Sequence[str] | tuple[None] = Field(default=(None,))
+    """List of plan names and patterns this group is allowed to use."""
+
+    forbidden_plans: Sequence[str] | tuple[None] = Field(default=(None,))
+    """List of plan names and patterns this group is forbidden to use."""
+
+    allowed_devices: Sequence[str] | tuple[None] = Field(default=(None,))
+    """(NOT IMPLEMENTED) List of device names and patterns this group is allowed to use."""
+
+    forbidden_devices: Sequence[str] | tuple[None] = Field(default=(None,))
+    """(NOT IMPLEMENTED) List of device names and patterns this group is forbidden to use."""
+
+    def is_plan_allowed(self, plan_name: str) -> bool:
+        """Return whether a plan is allowed or forbidden for this user."""
+
+        def matches(expr: str) -> bool:
+            if expr.startswith(":"):
+                pattern = re.compile(expr[1:])
+            else:
+                pattern = re.compile("^" + expr + "$")
+
+            return pattern.match(plan_name) is not None
+
+        is_allowed = all(expr is None or matches(expr) for expr in self.allowed_plans)
+        if not is_allowed:
+            return False
+
+        is_forbidden = any(expr is not None and matches(expr) for expr in self.forbidden_plans)
+        if is_forbidden:
+            return False
+
+        return True
+
+
+class _ManagerResourceAuthorizationPolicy(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    policy_name: str = Field(
+        alias="policy", default="satellite.server.security.access_policies:BasicResourceAccessPolicy"
+    )
+    """Python class path of the access policy to use."""
+
+    group_permissions: dict[str, _ManagerResourceGroupPermissions] = Field(alias="user_groups", default={})
+    """Assignment of resource access permissions for individual groups."""
+
+    args: dict[str, Any] = Field(default={})
+    """Extra arguments to send to the access policy at instance creation."""
+
+    @field_validator("policy_name")
+    @classmethod
+    def validate_policy_name(cls, value) -> str:
+        from importlib.util import find_spec
+
+        try:
+            module_path = str(value).split(":")[0]
+            if find_spec(module_path) is None:
+                raise ValueError(f"Couldn't find module at '{module_path}'.")
+        except Exception as exc:
+            raise ValueError(f"Failed to parse '{repr(value)}' as a python class path.") from exc
+
+        return value
+
+
+class _ManagerAuthorizationSection(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True, extra="ignore")
+
+    api_access_authorization: _ManagerAPIAuthorizationPolicy = Field(
+        alias="api_access", default=_ManagerAPIAuthorizationPolicy()
+    )
+    """Access control policy for access of API endpoints."""
+
+    resource_access_authorization: _ManagerResourceAuthorizationPolicy = Field(
+        alias="resource_access", default=_ManagerResourceAuthorizationPolicy()
+    )
+    """Access control policy for access of server resources."""
+
+
 class _ManagerNetworkSection(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore")
 
@@ -142,6 +247,8 @@ class ManagerConfiguration(BaseModel):
 
     authentication: _ManagerAuthenticationSection = Field(default=_ManagerAuthenticationSection())
     """Default 'authentication' section for all managers."""
+    authorization: _ManagerAuthorizationSection = Field(default=_ManagerAuthorizationSection())
+    """Default 'authorization' section for all managers."""
     network: _ManagerNetworkSection = Field(default=_ManagerNetworkSection())
     """Default 'network' section for all managers."""
     operation: _ManagerOperationSection = Field(default=_ManagerOperationSection())

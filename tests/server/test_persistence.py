@@ -189,3 +189,10 @@ async def test_history(
     # Check: history_length, history_clear worked as intended
     current_length = await backend.history_length()
     assert current_length == 0
+
+
+async def test_redis_key_with_no_queue_name():
+    backend = RedisPersistenceBackend(mock=True, queue_name="test_queue", no_queue_name_in_key=True)
+
+    assert backend.key_separator() == "_"
+    assert backend.full_key_prefix == "qs_default"

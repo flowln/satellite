@@ -43,18 +43,26 @@ class PersistenceBackend:
     QUEUE_KEY = "item_queue"
     HISTORY_KEY = "item_history"
 
-    def __init__(self, queue_name: str, key_prefix: str = ""):
+    def __init__(self, queue_name: str, key_prefix: str = "qs_default", *, no_queue_name_in_key: bool = False):
         self._queue_name = queue_name
         self._key_prefix = key_prefix
+
+        self._no_queue_name_in_key = no_queue_name_in_key
+
+        # NOTE: This is made to further maintain queueserver compatibility, which is the
+        # most likely scenario in which someone uses the 'no_queue_name_in_key' option.
+        self._key_separator = ":" if not no_queue_name_in_key else "_"
 
     @cached_property
     def full_key_prefix(self) -> str:
         """Prefix of any key used in the backend."""
+        if self._no_queue_name_in_key:
+            return self._key_prefix
         return self._key_prefix + (self.key_separator() if len(self._key_prefix) != 0 else "") + self._queue_name
 
     def key_separator(self) -> str:
         """Separator of hierarchical levels inside a key."""
-        return ":"
+        return self._key_separator
 
     @abstractmethod
     async def get_existing_plans(self, sub_key: str | None = None) -> dict[str, PlanAnnotation] | PlanAnnotation | None:

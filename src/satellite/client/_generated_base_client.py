@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-02T19:23+00:00
-Git revision: 2f7d3e1fd54a2a984f4dfb32800d7a810550cf6d
+Date: 2026-08-05T17:18+00:00
+Git revision: 8488b4657fd0e158027a06ef0281389ebea92fe4
 """
 
 from abc import abstractmethod
@@ -179,8 +179,6 @@ class BaseAsyncClient(httpx.AsyncClient):
     async def queue_item_add(
         self,
         item: QueueItem,
-        user_group: str = "primary",
-        user: str = "default",
         pos: int | Literal["front", "back"] = "back",
         before_uid: str | None = None,
         after_uid: str | None = None,
@@ -195,14 +193,6 @@ class BaseAsyncClient(httpx.AsyncClient):
             The item to add to the queue.
 
             The 'item_uid' field is expected to be null, as it will be filled up after this call.
-        user_group : str, optional
-            The group associated with the user currently making the request. Defaults to 'primary'.
-
-            It is used for recording information in the item, so that it's easier to track later.
-        user : str, optional
-            The user making the request. Defaults to 'default'.
-
-            It is used for recording information in the item, so that it's easier to track later.
         pos : int, "back" or "front", optional
             The position in which to add this item in the queue.
 
@@ -221,18 +211,19 @@ class BaseAsyncClient(httpx.AsyncClient):
             Insert the item after (i.e. executes afterwards) the item with the specified uid.
 
             This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
         lock_key : str, optional
             The lock key currently being used.
         """
         response = await self.post_implementation(
-            "/queue_item_add",
-            item=item,
-            user_group=user_group,
-            user=user,
-            pos=pos,
-            before_uid=before_uid,
-            after_uid=after_uid,
-            lock_key=lock_key,
+            "/queue_item_add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
         )
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
@@ -591,8 +582,6 @@ class BaseSyncClient:
     def queue_item_add(
         self,
         item: QueueItem,
-        user_group: str = "primary",
-        user: str = "default",
         pos: int | Literal["front", "back"] = "back",
         before_uid: str | None = None,
         after_uid: str | None = None,
@@ -607,14 +596,6 @@ class BaseSyncClient:
             The item to add to the queue.
 
             The 'item_uid' field is expected to be null, as it will be filled up after this call.
-        user_group : str, optional
-            The group associated with the user currently making the request. Defaults to 'primary'.
-
-            It is used for recording information in the item, so that it's easier to track later.
-        user : str, optional
-            The user making the request. Defaults to 'default'.
-
-            It is used for recording information in the item, so that it's easier to track later.
         pos : int, "back" or "front", optional
             The position in which to add this item in the queue.
 
@@ -633,18 +614,19 @@ class BaseSyncClient:
             Insert the item after (i.e. executes afterwards) the item with the specified uid.
 
             This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
         lock_key : str, optional
             The lock key currently being used.
         """
         response = self.post_implementation(
-            "/queue_item_add",
-            item=item,
-            user_group=user_group,
-            user=user,
-            pos=pos,
-            before_uid=before_uid,
-            after_uid=after_uid,
-            lock_key=lock_key,
+            "/queue_item_add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
         )
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())

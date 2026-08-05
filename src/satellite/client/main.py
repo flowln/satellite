@@ -161,6 +161,50 @@ def _generate_sync_implementation(node: ast.FunctionDef, endpoint: str, endpoint
             )
 
 
+def _clear_fastapi_dependencies_from_args(node: ast.AsyncFunctionDef) -> ast.AsyncFunctionDef:
+    """Remove FastAPI dependency arguments from a node's signature."""
+
+    def _set_clean_arguments(name: str, defaults_name: str | None = None):
+        arguments = getattr(node.args, name)
+
+        if arguments is None:
+            return
+
+        is_single_element = isinstance(arguments, ast.arg)
+        if is_single_element:
+            arguments = [arguments]
+
+        new_arguments = []
+        for arg_idx, argument in enumerate(arguments):
+            # NOTE: All these are used to remove 'Annotated[x, ...]' arguments, since they're likely
+            # FastAPI dependencies, and shouldn't be included in the client.
+            if argument.annotation is None or not isinstance(argument.annotation, ast.Subscript):
+                pass
+            elif not isinstance(argument.annotation.value, ast.Name) or argument.annotation.value.id != "Annotated":
+                pass
+            elif not isinstance(argument.annotation.slice, ast.Tuple):
+                pass
+            else:
+                if defaults_name is not None:
+                    default_list: list = getattr(node.args, defaults_name)
+                    arg_idx_in_defaults = arg_idx - (len(arguments) - len(default_list))
+                    if 0 <= arg_idx_in_defaults < len(default_list):
+                        default_list.pop(arg_idx_in_defaults)
+                    setattr(node.args, defaults_name, default_list)
+                continue
+
+            new_arguments.append(argument)
+
+        setattr(node.args, name, new_arguments if not is_single_element else new_arguments[0])
+
+    _set_clean_arguments("args", "defaults")
+    _set_clean_arguments("vararg")
+    _set_clean_arguments("kwonlyargs", "kw_defaults")
+    _set_clean_arguments("kwarg")
+
+    return node
+
+
 def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: pathlib.Path) -> ast.Module:
     """Parse endpoint methods from 'class_node', and generate equivalent client-side methods from them."""
     finished_node = _load_template(package_root)
@@ -171,6 +215,8 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
 
         # Change the method name to the endpoint's name
         node.name = endpoint.replace("/", "_").removeprefix("_")
+
+        node = _clear_fastapi_dependencies_from_args(node)
 
         for _output_node in finished_node.body:
             if not isinstance(_output_node, ast.ClassDef):

@@ -351,3 +351,11 @@ async def test_console_output_update(client: httpx.AsyncClient):
 
         message = "Server started successfully!"
         assert not any(message in _line for _line in console_obj.lines), console_obj.lines
+
+
+async def test_open_environment_twice(client):
+    async with open_environment(client):
+        pass
+
+    async with open_environment(client):
+        pass

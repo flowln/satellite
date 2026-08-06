@@ -176,4 +176,5 @@ class IPCCommunicationPair:
     def close(self):
         """Close the streams associated with this object."""
         self._reader.feed_eof()
-        self._writer.write_eof()
+        if self._writer.can_write_eof():
+            self._writer.write_eof()

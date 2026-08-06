@@ -352,7 +352,7 @@ def create_standard_stream_rerouters(
 
     def _on_write(fd: int, data: str):
         level = out_level if fd == out_pipe[0] else err_level
-        logger.log(level, data.strip())
+        logger.log(level, data.strip("\n"))
 
     consumer = PipeLogConsumer([out_pipe, err_pipe], on_write=_on_write, name="Stream rerouter")
     stdout = consumer.with_fileno(0)

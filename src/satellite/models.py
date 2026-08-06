@@ -233,6 +233,16 @@ class QueueAddRemoveResponse(GenericResponse):
     """The inserted / removed item, with the 'uid' attribute filled in. If 'success' = False, None is returned."""
 
 
+class RunEngineRunsResponse(GenericResponse):
+    """Data returned by the 're/runs' API endpoint."""
+
+    uid: UUID = Field(alias="run_list_uid")
+    """Unique identifier for the current run list state."""
+
+    runs: Sequence[UUID] = Field(alias="run_list", default=[])
+    """List of run UUIDs matching the specified requirements."""
+
+
 class LatestConsoleResponse(GenericResponse):
     """Data returned by the 'console_output' API endpoint."""
 

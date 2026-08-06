@@ -205,6 +205,18 @@ def _clear_fastapi_dependencies_from_args(node: ast.AsyncFunctionDef) -> ast.Asy
     return node
 
 
+def _is_fastapi_decorator(node: ast.expr) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if not isinstance(node.func, ast.Name):
+        return False
+    if "endpoint" not in node.func.id:
+        return False
+    if not isinstance(node.args[0], ast.Constant):
+        return False
+    return True
+
+
 def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: pathlib.Path) -> ast.Module:
     """Parse endpoint methods from 'class_node', and generate equivalent client-side methods from them."""
     finished_node = _load_template(package_root)
@@ -217,6 +229,7 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
         node.name = endpoint.replace("/", "_").removeprefix("_")
 
         node = _clear_fastapi_dependencies_from_args(node)
+        node.decorator_list = [_node for _node in node.decorator_list if not _is_fastapi_decorator(_node)]
 
         for _output_node in finished_node.body:
             if not isinstance(_output_node, ast.ClassDef):
@@ -251,17 +264,11 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
         match _node:
             case ast.AsyncFunctionDef(_, _, _, _decorators, _, _, _):
                 for idx, _decorator in enumerate(_node.decorator_list):
-                    if not isinstance(_decorator, ast.Call):
-                        continue
-                    if not isinstance(_decorator.func, ast.Name):
-                        continue
-                    if "endpoint" not in _decorator.func.id:
-                        continue
-                    if not isinstance(_decorator.args[0], ast.Constant):
+                    if not _is_fastapi_decorator(_decorator):
                         continue
 
-                    endpoint = str(_decorator.args[0].value)
-                    endpoint_type = _decorator.func.id.split("_")[0].upper()
+                    endpoint = str(_decorator.args[0].value)  # ty: ignore
+                    endpoint_type = _decorator.func.id.split("_")[0].upper()  # ty: ignore
 
                     _node_copy = copy.deepcopy(_node)
                     _node_copy.decorator_list.pop(idx)

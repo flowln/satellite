@@ -10,6 +10,7 @@ from satellite.models import (
     LatestConsoleResponse,
     ManagerStatus,
     QueueItem,
+    RunEngineRunsResponse,
 )
 from satellite.server.persistence import RedisPersistenceBackend
 
@@ -359,3 +360,62 @@ async def test_open_environment_twice(client):
 
     async with open_environment(client):
         pass
+
+
+async def test_run_uids(client: httpx.AsyncClient):
+    async with open_environment(client):
+        item = QueueItem(name="plan_with_various_runs")
+        request_body = item.model_dump(mode="json")
+        await client.post("/queue/queue/item/add", json=request_body)
+
+        _status = (await client.get("/queue/re/runs")).json()
+        model = RunEngineRunsResponse.model_validate(_status)
+        old_run_list_uid = model.uid
+
+        assert_response(await client.post("/queue/queue/start"))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+
+        status = ManagerStatus.model_validate(response.json())
+        assert status.worker_environment_exists
+
+        _current_run_list_uid = None
+
+        async def wait_run_list_change(option: str, number_of_elements: int):
+            nonlocal _current_run_list_uid
+            while True:
+                _status = (await client.get("/queue/re/runs", params={"option": option})).json()
+                _model = RunEngineRunsResponse.model_validate(_status)
+
+                if str(_model.uid) == str(old_run_list_uid):
+                    await asyncio.sleep(0.05)
+
+                    continue
+
+                assert len(_model.runs) == number_of_elements, _model
+                _current_run_list_uid = _model.uid
+
+                break
+
+        await wait_status_change(client, wait_run_list_change("active", 1))
+        await wait_status_change(client, wait_run_list_change("open", 1))
+        await wait_status_change(client, wait_run_list_change("closed", 0))
+
+        old_run_list_uid = _current_run_list_uid
+
+        await wait_status_change(client, wait_run_list_change("active", 1))
+        await wait_status_change(client, wait_run_list_change("open", 0))
+        await wait_status_change(client, wait_run_list_change("closed", 1))
+
+        old_run_list_uid = _current_run_list_uid
+
+        await wait_status_change(client, wait_run_list_change("active", 2))
+        await wait_status_change(client, wait_run_list_change("open", 1))
+        await wait_status_change(client, wait_run_list_change("closed", 1))
+
+        old_run_list_uid = _current_run_list_uid
+
+        await wait_status_change(client, wait_run_list_change("active", 2))
+        await wait_status_change(client, wait_run_list_change("open", 0))
+        await wait_status_change(client, wait_run_list_change("closed", 2))

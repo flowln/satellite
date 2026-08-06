@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-05T21:08+00:00
-Git revision: 3f7f66f5950dd7d1c5999b40367d11a79e6316b4
+Date: 2026-08-06T22:34+00:00
+Git revision: 1b17f2f042736275acecb903eb1919f93285f0aa
 """
 
 from abc import abstractmethod
@@ -28,6 +28,7 @@ from satellite.models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    RunEngineRunsResponse,
     SuccessfulLoginResponse,
     UserInformation,
 )
@@ -387,6 +388,26 @@ class BaseAsyncClient(httpx.AsyncClient):
         response = await self.post_implementation("/re/halt", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
+        return ret
+
+    async def re_runs(self, option: Literal["active", "open", "closed"] = "active") -> RunEngineRunsResponse:
+        """
+        Retrieve the list of runs in the current plan execution.
+
+        Parameters
+        ----------
+        option : active, open or closed, optional
+            Which set of runs to return:
+
+            `active`: Return all runs from the current execution. (default)
+
+            `open`: Return only the runs that have yet to emit a 'stop' document.
+
+            `closed`: Return only the runs that have already emitted a 'stop' document.
+        """
+        response = await self.get_implementation("/re/runs", option=option)
+        response.raise_for_status()
+        ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
     async def console_output(self, lines: int = 200) -> LatestConsoleResponse:
@@ -804,6 +825,26 @@ class BaseSyncClient:
         response = self.post_implementation("/re/halt", lock_key=lock_key)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
+        return ret
+
+    def re_runs(self, option: Literal["active", "open", "closed"] = "active") -> RunEngineRunsResponse:
+        """
+        Retrieve the list of runs in the current plan execution.
+
+        Parameters
+        ----------
+        option : active, open or closed, optional
+            Which set of runs to return:
+
+            `active`: Return all runs from the current execution. (default)
+
+            `open`: Return only the runs that have yet to emit a 'stop' document.
+
+            `closed`: Return only the runs that have already emitted a 'stop' document.
+        """
+        response = self.get_implementation("/re/runs", option=option)
+        response.raise_for_status()
+        ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
     def console_output(self, lines: int = 200) -> LatestConsoleResponse:

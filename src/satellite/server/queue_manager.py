@@ -34,6 +34,7 @@ from ..models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    RunEngineRunsResponse,
 )
 from .console import (
     create_standard_stream_rerouters,
@@ -48,6 +49,8 @@ from .environment import (
     HaltExecutionResult,
     HealthCheckStatus,
     HealthStatus,
+    ListExecutingRuns,
+    ListExecutingRunsResult,
     PauseExecution,
     PauseExecutionResult,
     ProvidedItemFinished,
@@ -251,6 +254,8 @@ class QueueManager:
                 pass
             case HaltExecutionResult(_uuid, _s, _m):
                 pass
+            case ListExecutingRunsResult(_uuid, _r, run_list_uid):
+                self._status.run_list_uid = run_list_uid
             case unhandled:
                 self._logger.warning("Unhandled object from environment sent: %s", repr(unhandled))
 
@@ -1182,6 +1187,50 @@ class QueueManager:
         ret.success = result.succeeded
         if not ret.success:
             ret.msg = result.fail_message
+
+        return ret
+
+    @get_endpoint("/re/runs", dependencies=[Security(get_current_user, scopes=["read:status"])])
+    @post_endpoint("/re/runs", dependencies=[Security(get_current_user, scopes=["read:status"])], deprecated=True)
+    async def run_engine_runs(
+        self,
+        option: Literal["active", "open", "closed"] = "active",
+        option_from_body: Annotated[str, Body(alias="option", embed=True)] = "",
+    ) -> RunEngineRunsResponse:
+        """
+        Retrieve the list of runs in the current plan execution.
+
+        Parameters
+        ----------
+        option : active, open or closed, optional
+            Which set of runs to return:
+
+            `active`: Return all runs from the current execution. (default)
+
+            `open`: Return only the runs that have yet to emit a 'stop' document.
+
+            `closed`: Return only the runs that have already emitted a 'stop' document.
+        """
+        ret = RunEngineRunsResponse(run_list_uid=self._status.run_list_uid)
+
+        await self.check_environment_process()
+
+        if not self._status.worker_environment_exists:
+            ret.uid = self._status.run_list_uid
+            return ret
+
+        if option_from_body != "":
+            option = option_from_body  # ty: ignore
+
+        include_open = option in {"active", "open"}
+        include_closed = option in {"active", "closed"}
+        result: ListExecutingRunsResult = await self._ask_environment(
+            ListExecutingRuns, ListExecutingRunsResult, include_open, include_closed
+        )
+
+        ret.uid = self._status.run_list_uid
+        if result is not None:
+            ret.runs = [UUID(x) for x in result.run_list]
 
         return ret
 

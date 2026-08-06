@@ -42,7 +42,7 @@ JWT_API_SCOPES_CLAIM = "scopes"
 JWT_BLACKLIST: dict[str, set] = defaultdict(set)
 
 PASSWORD_SCHEME = OAuth2PasswordBearer(
-    tokenUrl="login", refreshUrl="session_refresh", scopes=API_SCOPES, auto_error=False
+    tokenUrl="/auth/login", refreshUrl="/auth/session/refresh", scopes=API_SCOPES, auto_error=False
 )
 
 ### Reimports

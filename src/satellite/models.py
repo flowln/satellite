@@ -6,6 +6,8 @@ from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from satellite.annotations import DeviceAnnotation, PlanAnnotation
+
 
 def create_timed_uuid(base_uuid: UUID, time: dt.datetime) -> UUID:
     """Create a UUID referent to the given datetime object."""
@@ -254,8 +256,8 @@ class AllowedPlansResponse(GenericResponse):
     uid: UUID = Field(alias="plans_allowed_uid")
     """Unique identifier for the current list of allowed plans."""
 
-    items: list[str] = Field(alias="plans_allowed", default=[])
-    """List of plan names allowed for the current user group."""
+    items: dict[str, PlanAnnotation] = Field(alias="plans_allowed", default={})
+    """Dictionary of (plan name -> plan annotation) allowed for the current user group."""
 
 
 class AllowedDevicesResponse(GenericResponse):
@@ -264,5 +266,5 @@ class AllowedDevicesResponse(GenericResponse):
     uid: UUID = Field(alias="devices_allowed_uid")
     """Unique identifier for the current list of allowed devices."""
 
-    items: list[str] = Field(alias="devices_allowed", default=[])
-    """List of device names allowed for the current user group."""
+    items: dict[str, DeviceAnnotation] = Field(alias="devices_allowed", default={})
+    """Dictionary of (device name -> device annotation) allowed for the current user group."""

@@ -348,6 +348,63 @@ class QueueManager:
 
         return response
 
+    async def _retrieve_and_cache_plan_annotations_from_environment(self) -> dict[str, PlanAnnotation] | None:
+        # Get current annotations if environment exists
+        await self.check_environment_process()
+        if self._environment_process_handle is None:
+            return
+
+        response = await self._ask_environment(RetrieveAllPlanAnnotations, RetrieveAllPlanAnnotationsResult)
+        if response is None:
+            self._logger.warning("Failed to retrieve plan annotations response from environment.")
+            return
+
+        _ret = response.value
+
+        # Cache the received value.
+        await self._persistence_backend.set_existing_plans(_ret)
+        self._status.plans_existing_uid = self._persistence_backend.existing_plans_uid
+        self._status.plans_allowed_uid = self._persistence_backend.existing_plans_uid
+        await self._status.update_manager_state(self._status.manager_state, force=True)
+
+        return _ret
+
+    async def _retrieve_and_cache_device_annotations_from_environment(self) -> dict[str, DeviceAnnotation] | None:
+        # Get current annotations if environment exists
+        await self.check_environment_process()
+        if self._environment_process_handle is None:
+            return
+
+        response = await self._ask_environment(RetrieveAllDeviceAnnotations, RetrieveAllDeviceAnnotationsResult)
+        if response is None:
+            self._logger.warning("Failed to retrieve device annotations response from environment.")
+            return
+
+        _ret = response.value
+
+        # Cache the received value.
+        await self._persistence_backend.set_existing_devices(_ret)
+        self._status.devices_existing_uid = self._persistence_backend.existing_devices_uid
+        self._status.devices_allowed_uid = self._persistence_backend.existing_devices_uid
+        await self._status.update_manager_state(self._status.manager_state, force=True)
+
+        return _ret
+
+    async def _retrieve_plan_annotations(self, *, allow_cached: bool = True) -> dict[str, PlanAnnotation] | None:
+        if allow_cached:
+            # Retrieve cached value, it there is one.
+            annotation = await self._persistence_backend.get_existing_plans()
+            if isinstance(annotation, dict) and len(annotation) != 0:
+                return annotation
+
+        # Get current annotations if environment exists
+        annotations = await self._retrieve_and_cache_plan_annotations_from_environment()
+        if annotations is None:
+            self._logger.info("Failed to retrieve plan annotations.")
+            return
+
+        return annotations
+
     async def _retrieve_annotation_for_plan(self, item: QueueItem) -> PlanAnnotation | None:
         # Retrieve cached value, it there is one.
         annotation = await self._persistence_backend.get_existing_plans(sub_key=item.name)
@@ -355,40 +412,25 @@ class QueueManager:
             return annotation
 
         # Get current annotations if environment exists
-        await self.check_environment_process()
-
-        if self._environment_process_handle is None:
-            self._logger.info("Failed to retrieve annotation for item '%s'.", item.name)
-
+        annotations = await self._retrieve_and_cache_plan_annotations_from_environment()
+        if annotations is None:
+            self._logger.info("Failed to retrieve plan annotations for item '%s'.", item.name)
             return
-
-        annotations = (await self._ask_environment(RetrieveAllPlanAnnotations, RetrieveAllPlanAnnotationsResult)).value
-
-        # Cache the received value.
-        await self._persistence_backend.set_existing_plans(annotations)
 
         return annotations.get(item.name)
 
-    async def _retrieve_device_annotations(self) -> dict[str, DeviceAnnotation] | None:
-        # Retrieve cached value, it there is one.
-        annotations = await self._persistence_backend.get_existing_devices()
-        if isinstance(annotations, dict) and len(annotations) != 0:
-            return annotations
+    async def _retrieve_device_annotations(self, *, allow_cached: bool = True) -> dict[str, DeviceAnnotation] | None:
+        if allow_cached:
+            # Retrieve cached value, it there is one.
+            annotations = await self._persistence_backend.get_existing_devices()
+            if isinstance(annotations, dict) and len(annotations) != 0:
+                return annotations
 
         # Get current annotations if environment exists
-        await self.check_environment_process()
-
-        if self._environment_process_handle is None:
-            self._logger.info("Failed to retrieve device annotations from environment.")
-
+        annotations = await self._retrieve_and_cache_device_annotations_from_environment()
+        if annotations is None:
+            self._logger.info("Failed to retrieve device annotations.")
             return
-
-        annotations = (
-            await self._ask_environment(RetrieveAllDeviceAnnotations, RetrieveAllDeviceAnnotationsResult)
-        ).value
-
-        # Cache the received value.
-        await self._persistence_backend.set_existing_devices(annotations)
 
         return annotations
 
@@ -523,6 +565,10 @@ class QueueManager:
             ret.success = False
             ret.msg = "Failed to open environment: Timed out waiting for environment startup."
             return ret
+
+        # Reload annotation caches with the new environment.
+        await self._retrieve_plan_annotations(allow_cached=False)
+        await self._retrieve_device_annotations(allow_cached=False)
 
         return ret
 
@@ -1211,25 +1257,26 @@ class QueueManager:
         self, user_group: Annotated[str, Security(get_current_user_group, scopes=["read:queue"])]
     ) -> AllowedPlansResponse:
         """Retrieve a list of allowed plans for the current user."""
-        await self.check_environment_process()
-
         ret = AllowedPlansResponse(plans_allowed_uid=self._status.plans_allowed_uid)
 
         existing_plans = await self._persistence_backend.get_existing_plans()
         if isinstance(existing_plans, dict):
-            existing_plan_names = list(existing_plans.keys())
+            existing_plan_annotations = existing_plans
         elif isinstance(existing_plans, PlanAnnotation):
-            existing_plan_names = [existing_plans.plan_name]
+            existing_plan_annotations = {existing_plans.plan_name: existing_plans}
         else:
-            existing_plan_names = []
+            existing_plan_annotations = {}
 
         group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
         if user_group not in group_permissions:
-            ret.items = existing_plan_names
+            ret.items = existing_plan_annotations
 
             return ret
 
-        ret.items = list(filter(group_permissions[user_group].is_plan_allowed, existing_plan_names))
+        ret.items = {
+            _k: existing_plan_annotations[_k]
+            for _k in filter(group_permissions[user_group].is_plan_allowed, existing_plan_annotations.keys())
+        }
         return ret
 
     @get_endpoint("/devices/allowed")
@@ -1237,17 +1284,15 @@ class QueueManager:
         self, user_group: Annotated[str, Security(get_current_user_group, scopes=["read:queue"])]
     ) -> AllowedDevicesResponse:
         """Retrieve a list of allowed devices for the current user."""
-        await self.check_environment_process()
-
         ret = AllowedDevicesResponse(devices_allowed_uid=self._status.devices_allowed_uid)
 
         existing_devices = await self._persistence_backend.get_existing_devices()
         if isinstance(existing_devices, dict):
-            existing_device_names = list(existing_devices.keys())
-        elif isinstance(existing_devices, PlanAnnotation):
-            existing_device_names = [existing_devices.plan_name]
+            existing_device_names = existing_devices
+        elif isinstance(existing_devices, DeviceAnnotation):
+            existing_device_names = {existing_devices.device_name: existing_devices}
         else:
-            existing_device_names = []
+            existing_device_names = {}
 
         group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
         if user_group not in group_permissions:

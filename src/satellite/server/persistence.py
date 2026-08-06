@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from satellite.annotations import DeviceAnnotation, PlanAnnotation
-from satellite.models import HistoryItem, QueueItem
+from satellite.models import HistoryItem, QueueItem, create_uuid
 
 from .configuration import ManagerConfiguration
 
@@ -53,6 +53,9 @@ class PersistenceBackend:
         # most likely scenario in which someone uses the 'no_queue_name_in_key' option.
         self._key_separator = ":" if not no_queue_name_in_key else "_"
 
+        self._existing_plans_uid = create_uuid()
+        self._existing_devices_uid = create_uuid()
+
     @cached_property
     def full_key_prefix(self) -> str:
         """Prefix of any key used in the backend."""
@@ -63,6 +66,16 @@ class PersistenceBackend:
     def key_separator(self) -> str:
         """Separator of hierarchical levels inside a key."""
         return self._key_separator
+
+    @property
+    def existing_plans_uid(self) -> UUID:
+        """Unique identifier for the current state of the existing plans."""
+        return self._existing_plans_uid
+
+    @property
+    def existing_devices_uid(self) -> UUID:
+        """Unique identifier for the current state of the existing devices."""
+        return self._existing_devices_uid
 
     @abstractmethod
     async def get_existing_plans(self, sub_key: str | None = None) -> dict[str, PlanAnnotation] | PlanAnnotation | None:
@@ -393,7 +406,12 @@ class RedisPersistenceBackend(PersistenceBackend):
         await self._ensure_initialized(key, default_factory=dict)
 
         value_serialized = {_k: _v.model_dump(mode="json", by_alias=True) for _k, _v in value.items()}
-        return bool(await self._client.json().set(key, "$", value_serialized))
+        _ret = bool(await self._client.json().set(key, "$", value_serialized))
+
+        if _ret:
+            self._existing_plans_uid = create_uuid()
+
+        return _ret
 
     @wraps(PersistenceBackend.get_existing_devices)
     async def get_existing_devices(  # noqa
@@ -410,7 +428,12 @@ class RedisPersistenceBackend(PersistenceBackend):
         await self._ensure_initialized(key, default_factory=dict)
 
         value_serialized = {_k: _v.model_dump(mode="json", by_alias=True) for _k, _v in value.items()}
-        return bool(await self._client.json().set(key, "$", value_serialized))
+        _ret = bool(await self._client.json().set(key, "$", value_serialized))
+
+        if _ret:
+            self._existing_devices_uid = create_uuid()
+
+        return _ret
 
     async def _list_get(self, key: str, offset: int = 0, limit: int | None = None) -> list[dict[str, Any]]:
         await self._ensure_initialized(key)

@@ -1,13 +1,18 @@
 import asyncio
 from collections.abc import Callable
+import json
+import logging
 import time as ttime
 from typing import cast
 
 import httpx
+import pydantic
 
 from satellite.models import ManagerStatus, SuccessfulLoginResponse, UserInformation
 
 from ._generated_base_client import BaseAsyncClient, BaseSyncClient
+
+logger = logging.getLogger("satellite.client")
 
 
 class OAuthAuthentication(httpx.Auth):
@@ -68,11 +73,26 @@ class AsyncClient(BaseAsyncClient):
 
             request_url += "&".join(parameters)
 
+        logger.debug("Sending GET request to '%s'.", request_url)
+
         return await self.get(request_url)
 
     async def post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         """Perform a POST request and return the result."""
-        return await self.post(endpoint, json=kwargs)
+        query_parameters = {}
+        body_parameters = {}
+
+        for parameter_name, parameter_value in kwargs.items():
+            if isinstance(parameter_value, pydantic.BaseModel):
+                body_parameters[parameter_name] = parameter_value.model_dump(mode="json")
+            else:
+                query_parameters[parameter_name] = parameter_value
+
+        logger.debug("Sending POST request to '%s' with the following data:", endpoint)
+        logger.debug("  Query parameters: %s", " ".join(f"{_k}={_v}" for _k, _v in query_parameters.items()))
+        logger.debug("  Message body: %s", json.dumps(body_parameters))
+
+        return await self.post(endpoint, params=query_parameters, json=body_parameters)
 
     async def wait_for_condition(
         self,
@@ -203,7 +223,7 @@ class AsyncClient(BaseAsyncClient):
         SuccessfulLoginResponse
             The tokens and login information of the request.
         """
-        endpoint = "/login"
+        endpoint = "/auth/login"  # FIXME: Get the provider from somewhere and use that
         if expiration_time is not None:
             endpoint += f"?override_expiration_time={expiration_time}"
 
@@ -213,7 +233,7 @@ class AsyncClient(BaseAsyncClient):
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
 
         auth_handler = OAuthAuthentication(
-            parsed_response.token, parsed_response.refresh_token, self.base_url.join("/session_refresh")
+            parsed_response.token, parsed_response.refresh_token, self.base_url.join("/auth/session/refresh")
         )
 
         self.auth = auth_handler
@@ -230,10 +250,10 @@ class AsyncClient(BaseAsyncClient):
         access_token_header = current_auth.make_headers_for_token(current_auth.access_token)
         refresh_token_header = current_auth.make_headers_for_token(current_auth.refresh_token)
 
-        response = await self.post("/logout", headers=access_token_header)
+        response = await self.post("/auth/logout", headers=access_token_header)
         response.raise_for_status()
 
-        response = await self.post("/logout", headers=refresh_token_header)
+        response = await self.post("/auth/logout", headers=refresh_token_header)
         response.raise_for_status()
 
     async def refresh_session(self, *, expiration_time: int | float | None = None) -> SuccessfulLoginResponse:
@@ -258,7 +278,7 @@ class AsyncClient(BaseAsyncClient):
 
         refresh_token_header = current_auth.make_headers_for_token(current_auth.refresh_token)
 
-        endpoint = "/session_refresh"
+        endpoint = "auth/session/refresh"
         if expiration_time is not None:
             endpoint += f"?override_expiration_time={expiration_time}"
 

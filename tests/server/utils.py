@@ -36,16 +36,16 @@ async def open_environment(client: httpx.AsyncClient, *, clear: bool = True):
     await wait_status_change(client, _wait_for_idle())
 
     if clear:
-        (await client.post("/queue/queue_clear")).raise_for_status()
-        (await client.post("/queue/history_clear")).raise_for_status()
+        (await client.post("/queue/queue/clear")).raise_for_status()
+        (await client.post("/queue/history/clear")).raise_for_status()
 
-    (await client.post("/queue/environment_open")).raise_for_status()
+    (await client.post("/queue/environment/open")).raise_for_status()
 
     await wait_status_change(client, _wait_for_idle(should_environment_be_alive=True))
 
     yield
 
-    (await client.post("/queue/environment_close")).raise_for_status()
+    (await client.post("/queue/environment/close")).raise_for_status()
 
     await wait_status_change(client, _wait_for_idle())
 

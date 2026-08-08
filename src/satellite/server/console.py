@@ -34,7 +34,11 @@ class _Buffer:
 
         if start < 0:
             start = len(buffer) + start
-        start = max(min(start, len(buffer) - 1), 0)
+        start = max(start, 0)
+
+        # Properly return nothing if we're requesting from the very end
+        if start >= len(buffer):
+            return []
 
         if end is None:
             return buffer[start:]
@@ -54,7 +58,7 @@ class _Buffer:
 
     def get_uid_for_queue(self, queue_name: str) -> UUID:
         current_uid = self._individual_uids[queue_name]
-        # NOTE: Next time, if looking up by uid, exclude this messaage from the results too.
+        # NOTE: Next time, if looking up by uid, exclude this message from the results too.
         current_buffer_position = len(self._internal_buffer[queue_name])
 
         # NOTE: We only need to keep track of UIDs that are returned by this call,
@@ -348,7 +352,7 @@ def create_standard_stream_rerouters(
 
     def _on_write(fd: int, data: str):
         level = out_level if fd == out_pipe[0] else err_level
-        logger.log(level, data.strip())
+        logger.log(level, data.strip("\n"))
 
     consumer = PipeLogConsumer([out_pipe, err_pipe], on_write=_on_write, name="Stream rerouter")
     stdout = consumer.with_fileno(0)

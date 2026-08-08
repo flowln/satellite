@@ -29,15 +29,18 @@ Git revision: $generation_git_revision
 """
 
 from abc import abstractmethod
-from collections.abc import Coroutine
 import asyncio
-
+from collections.abc import Coroutine
+import json
 from typing import Literal, Any
 from uuid import UUID
 
 import httpx
+import pydantic
 
 from satellite.models import (
+    AllowedDevicesResponse,
+    AllowedPlansResponse,
     ConsoleUidResponse,
     GenericResponse,
     HistoryResponse,
@@ -46,6 +49,7 @@ from satellite.models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    RunEngineRunsResponse,
     SuccessfulLoginResponse,
     UserInformation,
 )

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time as ttime
 from typing import cast
 
@@ -7,9 +8,17 @@ import pytest
 import yaml
 
 from satellite.client.client import AsyncClient, OAuthAuthentication
-from satellite.models import ManagerStatus
+from satellite.models import ManagerStatus, QueueItem
 from satellite.server.configuration import ManagerConfiguration, _ManagerAuthenticationProvider
 from satellite.server.security.access_policies import BasicAPIAccessPolicy
+
+
+@pytest.fixture(autouse=True, scope="session")
+def configure_client_logging():
+    logger = logging.getLogger("satellite.client")
+    logger.setLevel(logging.DEBUG)
+
+    yield
 
 
 @pytest.fixture
@@ -65,6 +74,43 @@ async def test_environment_open_close_with_wait_condition(python_client: AsyncCl
     await python_client.wait_for_idle(timeout=5)
     status = await python_client.status()
     assert status.manager_state == "idle"
+
+    response = await python_client.environment_close()
+    assert response.success, response.msg
+
+    await python_client.wait_for_idle(timeout=5)
+    status = await python_client.status()
+    assert status.manager_state == "idle"
+
+
+async def test_queue_item_add_and_run(python_client: AsyncClient):
+    response = await python_client.environment_open()
+    assert response.success, response.msg
+
+    await python_client.wait_for_idle(timeout=5)
+    status = await python_client.status()
+    assert status.manager_state == "idle"
+
+    try:
+        item = QueueItem(name="simple_plan", args=["rand"])
+        response = await python_client.queue_item_add(item)
+        assert response.success, response.msg
+
+        response = await python_client.queue_start()
+        assert response.success, response.msg
+
+        await python_client.wait_for_condition(lambda s: s.worker_environment_state == "running")
+        await python_client.wait_for_idle()
+
+        history = await python_client.history_get()
+        assert len(history.items) == 1
+        assert history.items[0].name == "simple_plan"
+    finally:
+        response = await python_client.queue_clear()
+        assert response.success, response.msg
+
+        response = await python_client.history_clear()
+        assert response.success, response.msg
 
     response = await python_client.environment_close()
     assert response.success, response.msg

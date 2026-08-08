@@ -1,7 +1,10 @@
 """The objective of these is mainly to validate inputs for plans, and provide a common representation to clients."""
 
+# NOTE: The queueserver compatibility implementations are based of this upstream documentation:
+# https://github.com/bluesky/bluesky-queueserver/blob/7427f492737b71cdeafd869133760ce8ee2cf07f/src/bluesky_queueserver/manager/conversions.py#L31
+
 from base64 import standard_b64decode, standard_b64encode
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, MutableSequence, Sequence
 import inspect
 import logging
 import pickle
@@ -13,51 +16,124 @@ from numpydoc.docscrape import FunctionDoc, ParseError
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     TypeAdapter,
     ValidationError as PydanticValidationError,
+    computed_field,
     field_serializer,
     field_validator,
 )
-from pydantic.v1.utils import sequence_like
 
 logger = logging.getLogger("satellite.annotations")
 
 
+BLUESKY_PROTOCOL_VARIANTS = {
+    "bluesky.protocols.Readable": "__READABLE__",
+    "bluesky.protocols.Movable": "__MOVABLE__",
+}
+
+
+class _NoValueSentinel: ...
+
+
 class _Argument(BaseModel):
+    """Definition of a plan argument, used for validation and for usage by clients."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
     name: str
     """Name of the argument, as defined in the plan signature."""
-    description: str | None = None
+    description: str | None = Field(default=None, exclude_if=lambda x: x is None)
     """Description of the argument, written on the docstring in NumpyDoc-style."""
-
-    kind: inspect._ParameterKind
-    """Position constraints for this argument."""
-    required: bool = True
-    """Whether this argument must be provided, meaning it doesn't have a default value."""
 
     annotation: Any = None
     """Type of the argument, used for validation."""
 
+    kind: inspect._ParameterKind
+    """Position constraints for this argument."""
+
+    default_value: Any = Field(
+        alias="default",
+        default=_NoValueSentinel(),
+        exclude_if=lambda x: isinstance(x, _NoValueSentinel),
+    )
+    """Default value for this argument, if present."""
+    required: bool = True
+    """Whether this argument must be provided, meaning it doesn't have a default value."""
+
+    minimum_value: int | float | None = Field(alias="min", default=None, exclude_if=lambda x: x is None)
+    """Field used for queueserver compatibility."""
+    maximum_value: int | float | None = Field(alias="max", default=None, exclude_if=lambda x: x is None)
+    """Field used for queueserver compatibility."""
+    step_by_value: int | float | None = Field(alias="step", default=None, exclude_if=lambda x: x is None)
+    """Field used for queueserver compatibility."""
+
+    @computed_field
+    @property
+    def is_optional(self) -> bool:
+        """Field used for queueserver compatibility."""
+        return not self.required
+
+    @computed_field
+    @property
+    def is_list(self) -> bool:
+        """Field used for queueserver compatibility."""
+        try:
+            # NOTE: Try to validate an empty list to see if the type annotation is compatible with it.
+            validator = TypeAdapter(self.annotation, config=ConfigDict(arbitrary_types_allowed=True))
+            validator.validate_python([])
+        except PydanticValidationError:
+            return False
+
+        return True
+
+    def _sanitize_protocol_types(self, value: str) -> str:
+        for src_value, dst_value in BLUESKY_PROTOCOL_VARIANTS.items():
+            value = value.replace(src_value, dst_value)
+
+        # Remove <class '...'> wrapping if the value came from a direct type -> str conversion.
+        value = value.replace("<class '", "")
+        value = value.replace("'>", "")
+
+        return value
+
     @field_serializer("annotation", mode="plain", when_used="json")
-    def annotation_serializer(self, value: Any) -> bytes:
-        return standard_b64encode(pickle.dumps(value))
+    def annotation_serializer(self, value: Any) -> dict[str, bytes | str]:
+        return {"value": standard_b64encode(pickle.dumps(value)), "type": self._sanitize_protocol_types(str(value))}
 
     @field_validator("annotation", mode="before")
     @classmethod
     def annotation_validator(cls, value: Any) -> Any:
-        if isinstance(value, (bytes, str)):
-            return pickle.loads(standard_b64decode(value))
+        if isinstance(value, dict):
+            return pickle.loads(standard_b64decode(value["value"]))
         return value
+
+    @field_serializer("kind", mode="plain", when_used="json")
+    def kind_serializer(self, value: inspect._ParameterKind) -> dict[str, str | int]:
+        return {"name": value.name, "value": value.value}
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def kind_validator(cls, value: dict[str, str | int] | inspect._ParameterKind) -> inspect._ParameterKind:
+        if isinstance(value, inspect._ParameterKind):  # noqa
+            return value
+        return inspect._ParameterKind(value["value"])  # noqa
 
 
 class PlanAnnotation(BaseModel):
     """Description of a plan's annotation."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, use_attribute_docstrings=True, serialize_by_alias=True)
 
-    plan_name: str
-    plan_signature: inspect.Signature
+    plan_name: str = Field(alias="name")
+    """Name of the plan."""
+    plan_description: str = Field(alias="description", default="no description")
+    """Description of the plan, usually taken from its docstring."""
 
-    arguments: dict[str, _Argument] = {}
+    plan_signature: inspect.Signature = Field(alias="signature")
+
+    arguments: MutableSequence[_Argument] = Field(alias="parameters", default=[])
+    """Parameters definitions for this plan, keyed by their name."""
 
     @field_serializer("plan_signature", mode="plain", when_used="json")
     def signature_serializer(self, value: inspect.Signature) -> bytes:  # noqa: D102
@@ -69,6 +145,12 @@ class PlanAnnotation(BaseModel):
         if isinstance(value, (bytes, str)):
             return pickle.loads(standard_b64decode(value))
         return value
+
+    def get_argument_with_name(self, name: str) -> _Argument | None:
+        """Find an argument definition object with the given name."""
+        for argument in self.arguments:
+            if argument.name == name:
+                return argument
 
 
 class DeviceAnnotation(BaseModel):
@@ -118,7 +200,7 @@ def generate_annotation_for_plan(plan: Callable, plan_name: str) -> PlanAnnotati
     ensuring all given arguments match their supposed types.
     """
     signature = inspect.signature(plan)
-    plan_annotation = PlanAnnotation(plan_name=plan_name, plan_signature=signature)
+    plan_annotation = PlanAnnotation(name=plan_name, signature=signature)
 
     try:
         parsed_docstring = FunctionDoc(plan, doc=inspect.getdoc(plan))
@@ -128,6 +210,10 @@ def generate_annotation_for_plan(plan: Callable, plan_name: str) -> PlanAnnotati
 
         return plan_annotation
 
+    summary = parsed_docstring.get("Summary", [""])
+    if len(summary) != 0:
+        plan_annotation.plan_description = summary[0]
+
     for param_name, param in signature.parameters.items():
         parameter = _Argument(
             name=param_name,
@@ -136,11 +222,13 @@ def generate_annotation_for_plan(plan: Callable, plan_name: str) -> PlanAnnotati
         )
 
         parameter.required = param.default is inspect.Parameter.empty
+        if not parameter.required:
+            parameter.default_value = param.default
 
-        plan_annotation.arguments[param_name] = parameter
+        plan_annotation.arguments.append(parameter)
 
     for arg_name, _, arg_desc in parsed_docstring.get("Parameters", []):
-        if (argument := plan_annotation.arguments.get(arg_name)) is not None:
+        if (argument := plan_annotation.get_argument_with_name(arg_name)) is not None:
             argument.description = "\n".join(arg_desc)
 
     # TODO: Parse from '_custom_parameter_annotation_', used by bluesky-queueserver
@@ -209,7 +297,10 @@ def validate_plan(
         raise ValidationError.from_exc(exc) from exc
 
     for argument_name, argument_value in bound_arguments.arguments.items():
-        _argument_annotation = annotation.arguments[argument_name].annotation
+        argument = annotation.get_argument_with_name(argument_name)
+        if argument is None:
+            raise RuntimeError
+        _argument_annotation = argument.annotation
 
         if isinstance(argument_value, Iterable) and not isinstance(argument_value, str):
             is_valid = _validate_iterable_argument(
@@ -252,7 +343,7 @@ def _validate_iterable_argument(
 
     devices = values
 
-    if sequence_like(devices):
+    if isinstance(devices, Sequence):
         devices = list(values)
 
         for index, device in enumerate(devices):

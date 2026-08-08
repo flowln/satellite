@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-05T17:18+00:00
-Git revision: 8488b4657fd0e158027a06ef0281389ebea92fe4
+Date: 2026-08-08T20:33+00:00
+Git revision: 151253802731889e2b28e872a1a587a3a1c8b5a7
 """
 
 from abc import abstractmethod
@@ -18,6 +18,8 @@ from uuid import UUID
 import httpx
 
 from satellite.models import (
+    AllowedDevicesResponse,
+    AllowedPlansResponse,
     ConsoleUidResponse,
     GenericResponse,
     HistoryResponse,
@@ -26,6 +28,7 @@ from satellite.models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    RunEngineRunsResponse,
     SuccessfulLoginResponse,
     UserInformation,
 )
@@ -69,14 +72,16 @@ class BaseAsyncClient(httpx.AsyncClient):
 
     async def ping(self) -> dict[Literal["message"], Literal["pong"]]:
         """Test connectivity with the queue manager. Always responds 'pong'."""
-        response = await self.get_implementation("/ping")
+        parameters = {}
+        response = await self.get_implementation("/ping", **parameters)
         response.raise_for_status()
         ret = response.json()
         return ret
 
     async def status(self) -> ManagerStatus:
         """Retrieve the current state of the manager."""
-        response = await self.get_implementation("/status")
+        parameters = {}
+        response = await self.get_implementation("/status", **parameters)
         response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
         return ret
@@ -91,7 +96,15 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        response = await self.post_implementation("/environment_open", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/environment/open", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -106,7 +119,15 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        response = await self.post_implementation("/environment_close", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/environment/close", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -124,7 +145,15 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        response = await self.post_implementation("/environment_destroy", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/environment/destroy", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -143,21 +172,31 @@ class BaseAsyncClient(httpx.AsyncClient):
             starts at the newest entry, and goes up from there.
 
         """
-        response = await self.get_implementation("/history_get", limit=limit, offset=offset)
+        default_values = {"limit": None, "offset": 0}
+        original_parameters = {"limit": limit, "offset": offset}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.get_implementation("/history/get", **parameters)
         response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
     async def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
-        response = await self.post_implementation("/history_clear")
+        parameters = {}
+        response = await self.post_implementation("/history/clear", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
     async def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
-        response = await self.get_implementation("/queue_get")
+        parameters = {}
+        response = await self.get_implementation("/queue/get", **parameters)
         response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
@@ -171,7 +210,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_clear", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/clear", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -222,9 +269,21 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation(
-            "/queue_item_add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
-        )
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        original_parameters = {
+            "item": item,
+            "pos": pos,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/add", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -254,7 +313,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_item_remove", pos=pos, uid=uid, lock_key=lock_key)
+        default_values = {"pos": None, "uid": None, "lock_key": None}
+        original_parameters = {"pos": pos, "uid": uid, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/remove", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -268,7 +335,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_start", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/start", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -285,7 +360,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_stop", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/stop", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -302,7 +385,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/queue_stop_cancel", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/stop/cancel", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -326,7 +417,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_pause", option=option, lock_key=lock_key)
+        default_values = {"option": "deferred", "lock_key": None}
+        original_parameters = {"option": option, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/re/pause", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -340,7 +439,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_resume", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/re/resume", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -354,7 +461,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_stop", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/re/stop", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -368,7 +483,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_abort", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/re/abort", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -382,9 +505,45 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = await self.post_implementation("/re_halt", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/re/halt", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
+        return ret
+
+    async def re_runs(self, option: Literal["active", "open", "closed"] = "active") -> RunEngineRunsResponse:
+        """
+        Retrieve the list of runs in the current plan execution.
+
+        Parameters
+        ----------
+        option : active, open or closed, optional
+            Which set of runs to return:
+
+            `active`: Return all runs from the current execution. (default)
+
+            `open`: Return only the runs that have yet to emit a 'stop' document.
+
+            `closed`: Return only the runs that have already emitted a 'stop' document.
+        """
+        default_values = {"option": "active"}
+        original_parameters = {"option": option}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.get_implementation("/re/runs", **parameters)
+        response.raise_for_status()
+        ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
     async def console_output(self, lines: int = 200) -> LatestConsoleResponse:
@@ -396,12 +555,20 @@ class BaseAsyncClient(httpx.AsyncClient):
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        response = await self.get_implementation("/console_output", lines=lines)
+        default_values = {"lines": 200}
+        original_parameters = {"lines": lines}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.get_implementation("/console_output", **parameters)
         response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
-    async def console_output_update(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    async def console_output_update(self, last_msg_uid: UUID | None = None, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -412,7 +579,15 @@ class BaseAsyncClient(httpx.AsyncClient):
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        response = await self.get_implementation("/console_output_update", last_msg_uid=last_msg_uid, lines=lines)
+        default_values = {"last_msg_uid": None, "lines": 200}
+        original_parameters = {"last_msg_uid": last_msg_uid, "lines": lines}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.get_implementation("/console_output_update", **parameters)
         response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
@@ -424,9 +599,26 @@ class BaseAsyncClient(httpx.AsyncClient):
         This identifier has the property that anytime a new line is appended to
         the console, a new uid is generated.
         """
-        response = await self.get_implementation("/console_output/uid")
+        parameters = {}
+        response = await self.get_implementation("/console_output/uid", **parameters)
         response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
+        return ret
+
+    async def plans_allowed(self) -> AllowedPlansResponse:
+        """Retrieve a list of allowed plans for the current user."""
+        parameters = {}
+        response = await self.get_implementation("/plans/allowed", **parameters)
+        response.raise_for_status()
+        ret = AllowedPlansResponse.model_validate(response.json())
+        return ret
+
+    async def devices_allowed(self) -> AllowedDevicesResponse:
+        """Retrieve a list of allowed devices for the current user."""
+        parameters = {}
+        response = await self.get_implementation("/devices/allowed", **parameters)
+        response.raise_for_status()
+        ret = AllowedDevicesResponse.model_validate(response.json())
         return ret
 
 
@@ -472,14 +664,16 @@ class BaseSyncClient:
 
     def ping(self) -> dict[Literal["message"], Literal["pong"]]:
         """Test connectivity with the queue manager. Always responds 'pong'."""
-        response = self.get_implementation("/ping")
+        parameters = {}
+        response = self.get_implementation("/ping", **parameters)
         response.raise_for_status()
         ret = response.json()
         return ret
 
     def status(self) -> ManagerStatus:
         """Retrieve the current state of the manager."""
-        response = self.get_implementation("/status")
+        parameters = {}
+        response = self.get_implementation("/status", **parameters)
         response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
         return ret
@@ -494,7 +688,15 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        response = self.post_implementation("/environment_open", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/environment/open", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -509,7 +711,15 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        response = self.post_implementation("/environment_close", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/environment/close", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -527,7 +737,15 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        response = self.post_implementation("/environment_destroy", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/environment/destroy", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -546,21 +764,31 @@ class BaseSyncClient:
             starts at the newest entry, and goes up from there.
 
         """
-        response = self.get_implementation("/history_get", limit=limit, offset=offset)
+        default_values = {"limit": None, "offset": 0}
+        original_parameters = {"limit": limit, "offset": offset}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.get_implementation("/history/get", **parameters)
         response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
     def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
-        response = self.post_implementation("/history_clear")
+        parameters = {}
+        response = self.post_implementation("/history/clear", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
     def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
-        response = self.get_implementation("/queue_get")
+        parameters = {}
+        response = self.get_implementation("/queue/get", **parameters)
         response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
@@ -574,7 +802,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_clear", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/clear", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -625,9 +861,21 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation(
-            "/queue_item_add", item=item, pos=pos, before_uid=before_uid, after_uid=after_uid, lock_key=lock_key
-        )
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        original_parameters = {
+            "item": item,
+            "pos": pos,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/add", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -657,7 +905,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_item_remove", pos=pos, uid=uid, lock_key=lock_key)
+        default_values = {"pos": None, "uid": None, "lock_key": None}
+        original_parameters = {"pos": pos, "uid": uid, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/remove", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -671,7 +927,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_start", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/start", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -688,7 +952,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_stop", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/stop", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -705,7 +977,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/queue_stop_cancel", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/stop/cancel", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -729,7 +1009,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_pause", option=option, lock_key=lock_key)
+        default_values = {"option": "deferred", "lock_key": None}
+        original_parameters = {"option": option, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/re/pause", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -743,7 +1031,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_resume", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/re/resume", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -757,7 +1053,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_stop", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/re/stop", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -771,7 +1075,15 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_abort", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/re/abort", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
@@ -785,9 +1097,45 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        response = self.post_implementation("/re_halt", lock_key=lock_key)
+        default_values = {"lock_key": None}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/re/halt", **parameters)
         response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
+        return ret
+
+    def re_runs(self, option: Literal["active", "open", "closed"] = "active") -> RunEngineRunsResponse:
+        """
+        Retrieve the list of runs in the current plan execution.
+
+        Parameters
+        ----------
+        option : active, open or closed, optional
+            Which set of runs to return:
+
+            `active`: Return all runs from the current execution. (default)
+
+            `open`: Return only the runs that have yet to emit a 'stop' document.
+
+            `closed`: Return only the runs that have already emitted a 'stop' document.
+        """
+        default_values = {"option": "active"}
+        original_parameters = {"option": option}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.get_implementation("/re/runs", **parameters)
+        response.raise_for_status()
+        ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
     def console_output(self, lines: int = 200) -> LatestConsoleResponse:
@@ -799,12 +1147,20 @@ class BaseSyncClient:
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        response = self.get_implementation("/console_output", lines=lines)
+        default_values = {"lines": 200}
+        original_parameters = {"lines": lines}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.get_implementation("/console_output", **parameters)
         response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
-    def console_output_update(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    def console_output_update(self, last_msg_uid: UUID | None = None, lines: int = 200) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -815,7 +1171,15 @@ class BaseSyncClient:
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        response = self.get_implementation("/console_output_update", last_msg_uid=last_msg_uid, lines=lines)
+        default_values = {"last_msg_uid": None, "lines": 200}
+        original_parameters = {"last_msg_uid": last_msg_uid, "lines": lines}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.get_implementation("/console_output_update", **parameters)
         response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
@@ -827,7 +1191,24 @@ class BaseSyncClient:
         This identifier has the property that anytime a new line is appended to
         the console, a new uid is generated.
         """
-        response = self.get_implementation("/console_output/uid")
+        parameters = {}
+        response = self.get_implementation("/console_output/uid", **parameters)
         response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
+        return ret
+
+    def plans_allowed(self) -> AllowedPlansResponse:
+        """Retrieve a list of allowed plans for the current user."""
+        parameters = {}
+        response = self.get_implementation("/plans/allowed", **parameters)
+        response.raise_for_status()
+        ret = AllowedPlansResponse.model_validate(response.json())
+        return ret
+
+    def devices_allowed(self) -> AllowedDevicesResponse:
+        """Retrieve a list of allowed devices for the current user."""
+        parameters = {}
+        response = self.get_implementation("/devices/allowed", **parameters)
+        response.raise_for_status()
+        ret = AllowedDevicesResponse.model_validate(response.json())
         return ret

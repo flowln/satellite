@@ -40,6 +40,18 @@ def bad_stuck_plan():
         time.sleep(0.5)
 
 
+def plan_with_various_runs():
+    yield from bps.open_run()
+    yield from bps.sleep(0.5)
+    yield from bps.close_run()
+
+    yield from bps.sleep(0.5)
+
+    yield from bps.open_run()
+    yield from bps.sleep(0.5)
+    yield from bps.close_run()
+
+
 from bluesky import RunEngine
 from bluesky.callbacks.best_effort import BestEffortCallback
 

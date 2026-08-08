@@ -14,7 +14,8 @@ import sys
 import threading
 import time as ttime
 from traceback import format_exception
-from typing import Any, no_type_check
+from typing import Any, TypedDict, no_type_check
+from uuid import UUID
 
 from bluesky import RunEngine
 from bluesky.protocols import HasName
@@ -30,7 +31,7 @@ from ..annotations import (
     generate_annotation_for_device,
     generate_annotation_for_plan,
 )
-from ..models import HistoryItem, QueueItem
+from ..models import HistoryItem, QueueItem, create_uuid
 from .configuration import (
     ManagerConfiguration,
     load_manager_configuration,
@@ -78,6 +79,9 @@ AbortExecutionResult = namedtuple("AbortExecutionResult", ("uuid", "succeeded", 
 HaltExecution = namedtuple("HaltExecution", ("uuid",))
 HaltExecutionResult = namedtuple("HaltExecutionResult", ("uuid", "succeeded", "fail_message"))
 
+ListExecutingRuns = namedtuple("ListExecutingRuns", ("uuid", "include_open", "include_closed"))
+ListExecutingRunsResult = namedtuple("ListExecutingRunsResult", ("uuid", "run_list", "run_list_uid"))
+
 
 class HealthStatus(enum.IntEnum):
     """Current status of the environment."""
@@ -86,6 +90,26 @@ class HealthStatus(enum.IntEnum):
     Closing = enum.auto()
     Idle = enum.auto()
     Running = enum.auto()
+
+
+class RunInformation(TypedDict):
+    """Information about an individual bluesky run."""
+
+    has_finished: bool
+    """Whether this run has already finished all execution."""
+
+    streams: list[str]
+    """Names of streams that have been opened by this run."""
+
+
+class ExecutionInformation(TypedDict):
+    """Information about some item execution."""
+
+    uid: UUID
+    """Unique identifier for the current execution state."""
+
+    runs: dict[str, RunInformation]
+    """Relationship between run UUIDs and their stream information."""
 
 
 VALID_STARTUP_FILE_PATTERN = re.compile(r"(\d){1,3}.+\.i?py")
@@ -144,6 +168,7 @@ class EnvironmentProcess:
 
         self._run_engine: RunEngine | None = None
         self._current_history_item = None
+        self._current_run_information = ExecutionInformation(uid=create_uuid(), runs={})
 
         self._available_plan_annotations: dict[str, PlanAnnotation] = {}
         self._available_plans: dict[str, Callable] = {}
@@ -333,6 +358,18 @@ class EnvironmentProcess:
                 future.add_done_callback(self._scheduled_futures.discard)
 
                 await self._conn.send_message(HaltExecutionResult(uuid, True, None))
+            case ListExecutingRuns(uuid, include_open, include_closed):
+                run_uuids = []
+
+                for executing_run_uid, run_information in self._current_run_information["runs"].items():
+                    if run_information["has_finished"] and include_closed:
+                        run_uuids.append(executing_run_uid)
+                    elif not run_information["has_finished"] and include_open:
+                        run_uuids.append(executing_run_uid)
+
+                await self._conn.send_message(
+                    ListExecutingRunsResult(uuid, run_uuids, self._current_run_information["uid"])
+                )
 
     def _handle_exception_in_event_loop(self, _loop: asyncio.AbstractEventLoop, context: dict[str, Any]):
         """
@@ -354,6 +391,7 @@ class EnvironmentProcess:
 
                     return
 
+                self._current_run_information = ExecutionInformation(uid=create_uuid(), runs={})
                 await self._resume_plan(new_plan_item=item)
             case "instruction":
                 history_item = HistoryItem.from_queue_item(item)
@@ -472,6 +510,30 @@ class EnvironmentProcess:
 
         self._current_history_item = None
 
+    def _create_callbacks_for_run_engine(self) -> list[Callable[[str, dict], None]]:
+        def _monitor_run_information(name: str, doc: dict):
+            self._logger.warning("Received document of type %s.", name)
+            match name:
+                case "start":
+                    uid = doc["uid"]
+
+                    self._current_run_information["runs"][uid] = RunInformation(has_finished=False, streams=[])
+                case "stop":
+                    run_uid = doc["run_start"]
+
+                    self._current_run_information["runs"][run_uid]["has_finished"] = True
+                case "descriptor":
+                    run_uid = doc["run_start"]
+                    stream_name = doc["name"]
+
+                    self._current_run_information["runs"][run_uid]["streams"].append(stream_name)
+                case _:
+                    return
+
+            self._current_run_information["uid"] = create_uuid()
+
+        return [_monitor_run_information]
+
     def _populate_from_startup(self):
         """Run startup files and update the environment's globals."""
         if not self._startup_directory_path.exists():
@@ -537,6 +599,9 @@ class EnvironmentProcess:
 
                 # NOTE: Override the user definition so we get more direct information.
                 obj._call_returns_result = True  # noqa
+
+                for callback in self._create_callbacks_for_run_engine():
+                    self._run_engine.subscribe(callback)
 
     def interrupt_process(self):
         """Safely interrupt all processing being made by this object."""

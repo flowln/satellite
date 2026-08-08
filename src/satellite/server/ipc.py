@@ -76,7 +76,8 @@ class IPCCommunicationPair:
         self._read_thread_handle.start()
 
     def _read_socket_on_background(self):
-        if self._read_loop is None:
+        close_on_exit = self._read_loop is None
+        if close_on_exit:
             self._read_loop = asyncio.new_event_loop()
 
         _partial_message = b""
@@ -111,7 +112,8 @@ class IPCCommunicationPair:
                 self._buffered_messages.append(_message)
             logger.debug("Put message into read buffer: %s", str(type(_message).__name__))
 
-        self._read_loop.close()
+        if close_on_exit:
+            self._read_loop.close()
 
     def available_messages(self) -> int:
         """Return the number of available messages to read from the internal buffer."""
@@ -174,4 +176,5 @@ class IPCCommunicationPair:
     def close(self):
         """Close the streams associated with this object."""
         self._reader.feed_eof()
-        self._writer.write_eof()
+        if self._writer.can_write_eof():
+            self._writer.write_eof()

@@ -221,7 +221,10 @@ def _create_password_login_handler(
     authenticator_cls = getattr(importlib.import_module(module_path), class_name)
     authenticator = authenticator_cls(**authentication_provider.args)
 
-    @router.post("/login")
+    # FIXME: Have one for this provider and a global one that redirects
+    @router.post("/auth/login", include_in_schema=False)
+    @router.post(f"/auth/provider/{authentication_provider.provider_name}")
+    @router.post(f"/auth/provider/{authentication_provider.provider_name}/login", include_in_schema=False)
     async def login(
         form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
         api_authorizer: Annotated[APIAccessPolicy, Depends(_get_api_access_authorizer)],
@@ -258,10 +261,12 @@ def _create_password_login_handler(
             token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
         )
 
-    @router.post("/logout")
+    # FIXME: Have one for this provider and a global one that redirects
+    @router.post("/auth/logout")
+    @router.post(f"/auth/provider/{authentication_provider.provider_name}/logout", include_in_schema=False)
     async def logout(token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)]) -> bool:
         """Revoke permissions from the given token, making it unusable."""
-        if isinstance(token, str):
+        if isinstance(token, (str, type(None))):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Credentials are not valid: {token}",
@@ -273,7 +278,9 @@ def _create_password_login_handler(
 
         return True
 
-    @router.post("/session_refresh")
+    # FIXME: Have one for this provider and a global one that redirects
+    @router.post("/auth/session/refresh")
+    @router.post(f"/auth/provider/{authentication_provider.provider_name}/session/refresh", include_in_schema=False)
     async def session_refresh(
         token: Annotated[dict[str, Any] | str, Depends(_get_decoded_token)],
         api_authorizer: Annotated[APIAccessPolicy, Depends(_get_api_access_authorizer)],

@@ -9,7 +9,7 @@ import time
 from typing import Annotated, Any, Literal, cast, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter, Security
+from fastapi import APIRouter, Body, Security
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -24,6 +24,8 @@ from ..annotations import (
     validate_plan,
 )
 from ..models import (
+    AllowedDevicesResponse,
+    AllowedPlansResponse,
     ConsoleUidResponse,
     GenericResponse,
     HistoryResponse,
@@ -32,6 +34,7 @@ from ..models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    RunEngineRunsResponse,
 )
 from .console import (
     create_standard_stream_rerouters,
@@ -46,6 +49,8 @@ from .environment import (
     HaltExecutionResult,
     HealthCheckStatus,
     HealthStatus,
+    ListExecutingRuns,
+    ListExecutingRunsResult,
     PauseExecution,
     PauseExecutionResult,
     ProvidedItemFinished,
@@ -249,6 +254,8 @@ class QueueManager:
                 pass
             case HaltExecutionResult(_uuid, _s, _m):
                 pass
+            case ListExecutingRunsResult(_uuid, _r, run_list_uid):
+                self._status.run_list_uid = run_list_uid
             case unhandled:
                 self._logger.warning("Unhandled object from environment sent: %s", repr(unhandled))
 
@@ -346,6 +353,63 @@ class QueueManager:
 
         return response
 
+    async def _retrieve_and_cache_plan_annotations_from_environment(self) -> dict[str, PlanAnnotation] | None:
+        # Get current annotations if environment exists
+        await self.check_environment_process()
+        if self._environment_process_handle is None:
+            return
+
+        response = await self._ask_environment(RetrieveAllPlanAnnotations, RetrieveAllPlanAnnotationsResult)
+        if response is None:
+            self._logger.warning("Failed to retrieve plan annotations response from environment.")
+            return
+
+        _ret = response.value
+
+        # Cache the received value.
+        await self._persistence_backend.set_existing_plans(_ret)
+        self._status.plans_existing_uid = self._persistence_backend.existing_plans_uid
+        self._status.plans_allowed_uid = self._persistence_backend.existing_plans_uid
+        await self._status.update_manager_state(self._status.manager_state, force=True)
+
+        return _ret
+
+    async def _retrieve_and_cache_device_annotations_from_environment(self) -> dict[str, DeviceAnnotation] | None:
+        # Get current annotations if environment exists
+        await self.check_environment_process()
+        if self._environment_process_handle is None:
+            return
+
+        response = await self._ask_environment(RetrieveAllDeviceAnnotations, RetrieveAllDeviceAnnotationsResult)
+        if response is None:
+            self._logger.warning("Failed to retrieve device annotations response from environment.")
+            return
+
+        _ret = response.value
+
+        # Cache the received value.
+        await self._persistence_backend.set_existing_devices(_ret)
+        self._status.devices_existing_uid = self._persistence_backend.existing_devices_uid
+        self._status.devices_allowed_uid = self._persistence_backend.existing_devices_uid
+        await self._status.update_manager_state(self._status.manager_state, force=True)
+
+        return _ret
+
+    async def _retrieve_plan_annotations(self, *, allow_cached: bool = True) -> dict[str, PlanAnnotation] | None:
+        if allow_cached:
+            # Retrieve cached value, it there is one.
+            annotation = await self._persistence_backend.get_existing_plans()
+            if isinstance(annotation, dict) and len(annotation) != 0:
+                return annotation
+
+        # Get current annotations if environment exists
+        annotations = await self._retrieve_and_cache_plan_annotations_from_environment()
+        if annotations is None:
+            self._logger.info("Failed to retrieve plan annotations.")
+            return
+
+        return annotations
+
     async def _retrieve_annotation_for_plan(self, item: QueueItem) -> PlanAnnotation | None:
         # Retrieve cached value, it there is one.
         annotation = await self._persistence_backend.get_existing_plans(sub_key=item.name)
@@ -353,40 +417,25 @@ class QueueManager:
             return annotation
 
         # Get current annotations if environment exists
-        await self.check_environment_process()
-
-        if self._environment_process_handle is None:
-            self._logger.info("Failed to retrieve annotation for item '%s'.", item.name)
-
+        annotations = await self._retrieve_and_cache_plan_annotations_from_environment()
+        if annotations is None:
+            self._logger.info("Failed to retrieve plan annotations for item '%s'.", item.name)
             return
-
-        annotations = (await self._ask_environment(RetrieveAllPlanAnnotations, RetrieveAllPlanAnnotationsResult)).value
-
-        # Cache the received value.
-        await self._persistence_backend.set_existing_plans(annotations)
 
         return annotations.get(item.name)
 
-    async def _retrieve_device_annotations(self) -> dict[str, DeviceAnnotation] | None:
-        # Retrieve cached value, it there is one.
-        annotations = await self._persistence_backend.get_existing_devices()
-        if isinstance(annotations, dict) and len(annotations) != 0:
-            return annotations
+    async def _retrieve_device_annotations(self, *, allow_cached: bool = True) -> dict[str, DeviceAnnotation] | None:
+        if allow_cached:
+            # Retrieve cached value, it there is one.
+            annotations = await self._persistence_backend.get_existing_devices()
+            if isinstance(annotations, dict) and len(annotations) != 0:
+                return annotations
 
         # Get current annotations if environment exists
-        await self.check_environment_process()
-
-        if self._environment_process_handle is None:
-            self._logger.info("Failed to retrieve device annotations from environment.")
-
+        annotations = await self._retrieve_and_cache_device_annotations_from_environment()
+        if annotations is None:
+            self._logger.info("Failed to retrieve device annotations.")
             return
-
-        annotations = (
-            await self._ask_environment(RetrieveAllDeviceAnnotations, RetrieveAllDeviceAnnotationsResult)
-        ).value
-
-        # Cache the received value.
-        await self._persistence_backend.set_existing_devices(annotations)
 
         return annotations
 
@@ -468,7 +517,7 @@ class QueueManager:
 
             await loop.run_in_executor(None, lambda: connection_loop.run_forever())
 
-    @post_endpoint("/environment_open", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/environment/open", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_open(self, lock_key: str | None = None) -> GenericResponse:
         """
         Open a new environment for plan execution.
@@ -522,9 +571,13 @@ class QueueManager:
             ret.msg = "Failed to open environment: Timed out waiting for environment startup."
             return ret
 
+        # Reload annotation caches with the new environment.
+        await self._retrieve_plan_annotations(allow_cached=False)
+        await self._retrieve_device_annotations(allow_cached=False)
+
         return ret
 
-    @post_endpoint("/environment_close", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/environment/close", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_close(self, lock_key: str | None = None) -> GenericResponse:
         """
         Close the currently active environment.
@@ -552,7 +605,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/environment_destroy", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/environment/destroy", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def environment_destroy(self, lock_key: str | None = None) -> GenericResponse:
         """
         Destroy the currently active environment, without cleaning up anything.
@@ -582,7 +635,7 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/history_get", dependencies=[Security(get_current_user, scopes=["read:history"])])
+    @get_endpoint("/history/get", dependencies=[Security(get_current_user, scopes=["read:history"])])
     async def history_get(self, limit: int | None = None, offset: int = 0) -> HistoryResponse:
         """
         Retrieve information about previously ran plans.
@@ -619,7 +672,7 @@ class QueueManager:
             msg=msg,
         )
 
-    @post_endpoint("/history_clear", dependencies=[Security(get_current_user, scopes=["write:history:edit"])])
+    @post_endpoint("/history/clear", dependencies=[Security(get_current_user, scopes=["write:history:edit"])])
     async def history_clear(self) -> GenericResponse:
         """Clear the history of previously ran plans."""
         ret = GenericResponse()
@@ -629,16 +682,16 @@ class QueueManager:
 
         return ret
 
-    @get_endpoint("/queue_get", dependencies=[Security(get_current_user, scopes=["read:queue"])])
+    @get_endpoint("/queue/get", dependencies=[Security(get_current_user, scopes=["read:queue"])])
     async def queue_get(self) -> QueueResponse:
         """Retrieve a list of all items currently in the queue."""
         await self.check_environment_process()
 
         queue = await self._persistence_backend.queue_get()
-        items_in_queue = [item.uid for item in queue if item.uid is not None]
+        items_in_queue = [item for item in queue if item.uid is not None]
         return QueueResponse(items=items_in_queue, plan_queue_uid=self._status.plan_queue_uid)
 
-    @post_endpoint("/queue_clear", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    @post_endpoint("/queue/clear", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_clear(self, lock_key: str | None = None) -> GenericResponse:
         """
         Remove all items currently in the queue.
@@ -658,10 +711,10 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_item_add")
+    @post_endpoint("/queue/item/add")
     async def queue_item_add(
         self,
-        item: QueueItem,
+        item: Annotated[QueueItem, Body(embed=True)],
         pos: int | Literal["front", "back"] = "back",
         before_uid: str | None = None,
         after_uid: str | None = None,
@@ -744,9 +797,13 @@ class QueueManager:
                 return ret
 
         # Populate information
+        if item.uid is None:  # No UID means this item is (probably) fresh new
+            item.creation_user = user
+            item.creation_user_group = user_group
+        item.last_modification_user = user
+        item.last_modification_user_group = user_group
+
         item.uid = create_uuid()
-        item.metadata["user"] = user
-        item.metadata["user_group"] = user_group
 
         # Insert in the queue at the correct position
         if before_uid is not None or after_uid is not None:
@@ -789,7 +846,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_item_remove", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    @post_endpoint("/queue/item/remove", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_item_remove(
         self,
         pos: int | Literal["front", "back"] | None = None,
@@ -864,7 +921,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/queue/start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_start(
         self,
         lock_key: str | None = None,
@@ -890,7 +947,7 @@ class QueueManager:
 
         return new_ret
 
-    @post_endpoint("/queue_stop", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/queue/stop", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_stop(
         self,
         lock_key: str | None = None,
@@ -927,7 +984,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/queue_stop_cancel", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
+    @post_endpoint("/queue/stop/cancel", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_stop_cancel(
         self,
         lock_key: str | None = None,
@@ -956,7 +1013,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_pause", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/pause", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_pause(
         self,
         option: Literal["immediate", "deferred"] = "deferred",
@@ -1001,7 +1058,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_resume", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/resume", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_resume(
         self,
         lock_key: str | None = None,
@@ -1035,7 +1092,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_stop", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/stop", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_stop(
         self,
         lock_key: str | None = None,
@@ -1069,7 +1126,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_abort", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/abort", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_abort(
         self,
         lock_key: str | None = None,
@@ -1103,7 +1160,7 @@ class QueueManager:
 
         return ret
 
-    @post_endpoint("/re_halt", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
+    @post_endpoint("/re/halt", dependencies=[Security(get_current_user, scopes=["write:plans:control"])])
     async def run_engine_halt(
         self,
         lock_key: str | None = None,
@@ -1137,6 +1194,50 @@ class QueueManager:
 
         return ret
 
+    @get_endpoint("/re/runs", dependencies=[Security(get_current_user, scopes=["read:status"])])
+    @post_endpoint("/re/runs", dependencies=[Security(get_current_user, scopes=["read:status"])], deprecated=True)
+    async def run_engine_runs(
+        self,
+        option: Literal["active", "open", "closed"] = "active",
+        option_from_body: Annotated[str, Body(alias="option", embed=True)] = "",
+    ) -> RunEngineRunsResponse:
+        """
+        Retrieve the list of runs in the current plan execution.
+
+        Parameters
+        ----------
+        option : active, open or closed, optional
+            Which set of runs to return:
+
+            `active`: Return all runs from the current execution. (default)
+
+            `open`: Return only the runs that have yet to emit a 'stop' document.
+
+            `closed`: Return only the runs that have already emitted a 'stop' document.
+        """
+        ret = RunEngineRunsResponse(run_list_uid=self._status.run_list_uid)
+
+        await self.check_environment_process()
+
+        if not self._status.worker_environment_exists:
+            ret.uid = self._status.run_list_uid
+            return ret
+
+        if option_from_body != "":
+            option = option_from_body  # ty: ignore
+
+        include_open = option in {"active", "open"}
+        include_closed = option in {"active", "closed"}
+        result: ListExecutingRunsResult = await self._ask_environment(
+            ListExecutingRuns, ListExecutingRunsResult, include_open, include_closed
+        )
+
+        ret.uid = self._status.run_list_uid
+        if result is not None:
+            ret.runs = [UUID(x) for x in result.run_list]
+
+        return ret
+
     @get_endpoint("/console_output", dependencies=[Security(get_current_user, scopes=["read:console"])])
     async def get_console_output(self, lines: int = 200) -> LatestConsoleResponse:
         """
@@ -1147,7 +1248,8 @@ class QueueManager:
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        ret = LatestConsoleResponse()
+        uid = (await self.get_console_output_uid()).uid
+        ret = LatestConsoleResponse(last_msg_uid=uid)
 
         log_centralizer = get_global_log_centralizer()
         return_lines = log_centralizer.lookup_queue(self._name, start=-lines)
@@ -1156,7 +1258,12 @@ class QueueManager:
         return ret
 
     @get_endpoint("/console_output_update", dependencies=[Security(get_current_user, scopes=["read:console"])])
-    async def get_console_output_from_uid(self, last_msg_uid: UUID, lines: int = 200) -> LatestConsoleResponse:
+    async def get_console_output_from_uid(
+        self,
+        last_msg_uid: UUID | None = None,
+        last_msg_uid_from_body: Annotated[str, Body(alias="last_msg_uid", embed=True)] = "",
+        lines: int = 200,
+    ) -> LatestConsoleResponse:
         """
         Retrieve the most recent lines of logging / console output, generated after some point.
 
@@ -1167,7 +1274,13 @@ class QueueManager:
         lines : int, optional
             Maximum amount of lines to retrieve. Defaults to 200.
         """
-        ret = LatestConsoleResponse()
+        if last_msg_uid is None:
+            if last_msg_uid_from_body is None or last_msg_uid_from_body == "":
+                return await self.get_console_output(lines=lines)
+            last_msg_uid = UUID(last_msg_uid_from_body)
+
+        uid = (await self.get_console_output_uid()).uid
+        ret = LatestConsoleResponse(last_msg_uid=uid)
 
         log_centralizer = get_global_log_centralizer()
         return_lines = log_centralizer.lookup_queue_by_uid(self._name, last_msg_uid, limit=lines)
@@ -1191,6 +1304,58 @@ class QueueManager:
         uid = log_centralizer.get_uid_for_queue(self._name)
 
         return ConsoleUidResponse(uid=uid)
+
+    @get_endpoint("/plans/allowed")
+    async def allowed_plans(
+        self, user_group: Annotated[str, Security(get_current_user_group, scopes=["read:queue"])]
+    ) -> AllowedPlansResponse:
+        """Retrieve a list of allowed plans for the current user."""
+        ret = AllowedPlansResponse(plans_allowed_uid=self._status.plans_allowed_uid)
+
+        existing_plans = await self._persistence_backend.get_existing_plans()
+        if isinstance(existing_plans, dict):
+            existing_plan_annotations = existing_plans
+        elif isinstance(existing_plans, PlanAnnotation):
+            existing_plan_annotations = {existing_plans.plan_name: existing_plans}
+        else:
+            existing_plan_annotations = {}
+
+        group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+        if user_group not in group_permissions:
+            ret.items = existing_plan_annotations
+
+            return ret
+
+        ret.items = {
+            _k: existing_plan_annotations[_k]
+            for _k in filter(group_permissions[user_group].is_plan_allowed, existing_plan_annotations.keys())
+        }
+        return ret
+
+    @get_endpoint("/devices/allowed")
+    async def allowed_devices(
+        self, user_group: Annotated[str, Security(get_current_user_group, scopes=["read:queue"])]
+    ) -> AllowedDevicesResponse:
+        """Retrieve a list of allowed devices for the current user."""
+        ret = AllowedDevicesResponse(devices_allowed_uid=self._status.devices_allowed_uid)
+
+        existing_devices = await self._persistence_backend.get_existing_devices()
+        if isinstance(existing_devices, dict):
+            existing_device_names = existing_devices
+        elif isinstance(existing_devices, DeviceAnnotation):
+            existing_device_names = {existing_devices.device_name: existing_devices}
+        else:
+            existing_device_names = {}
+
+        group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+        if user_group not in group_permissions:
+            ret.items = existing_device_names
+
+            return ret
+
+        # TODO: ret.items = list(filter(group_permissions[user_group].is_device_allowed, existing_device_names))
+        ret.items = existing_device_names
+        return ret
 
     def _on_exit(self):
         if self._environment_process_handle is not None and self._environment_process_handle.poll() is None:

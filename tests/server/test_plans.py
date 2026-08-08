@@ -103,23 +103,23 @@ async def wait_until_item_ran(client: httpx.AsyncClient, old_history_uid: UUID, 
 class TestPlanExecution:
     @pytest.fixture(autouse=True)
     async def with_environment_open(self, client: httpx.AsyncClient):
-        (await client.post("/queue/queue_clear")).raise_for_status()
-        (await client.post("/queue/history_clear")).raise_for_status()
+        (await client.post("/queue/queue/clear")).raise_for_status()
+        (await client.post("/queue/history/clear")).raise_for_status()
 
-        (await client.post("/queue/environment_open")).raise_for_status()
+        (await client.post("/queue/environment/open")).raise_for_status()
 
         await wait_for_idle(client)
 
         yield
 
-        (await client.post("/queue/environment_close")).raise_for_status()
+        (await client.post("/queue/environment/close")).raise_for_status()
 
         await wait_for_idle(client)
 
     async def test_failing_plan(self, client: httpx.AsyncClient):
         item = QueueItem(name="failing_plan")
-        request_body = item.model_dump(mode="json")
-        await client.post("/queue/queue_item_add", json=request_body)
+        request_body = {"item": item.model_dump(mode="json")}
+        await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         old_queue_uid = old_status.plan_queue_uid
@@ -127,12 +127,12 @@ class TestPlanExecution:
         old_history_uid = old_status.plan_history_uid
         old_history_size = old_status.items_in_history
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
         await wait_until_item_ran(client, old_history_uid, old_history_size)
 
-        response = await client.get("/queue/history_get")
+        response = await client.get("/queue/history/get")
         assert response.status_code == 200
 
         history = HistoryItem.model_validate(response.json()["items"][0])
@@ -144,12 +144,12 @@ class TestPlanExecution:
 
     @pytest.mark.parametrize(
         ("route_name", "exit_status"),
-        (("re_stop", "stopped"), ("re_abort", "aborted"), ("re_halt", "halted")),
+        (("re/stop", "stopped"), ("re/abort", "aborted"), ("re/halt", "halted")),
     )
     async def test_good_stuck_plan(self, client: httpx.AsyncClient, route_name: str, exit_status: str):
         item = QueueItem(name="good_stuck_plan")
-        request_body = item.model_dump(mode="json")
-        await client.post("/queue/queue_item_add", json=request_body)
+        request_body = {"item": item.model_dump(mode="json")}
+        await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         old_queue_uid = old_status.plan_queue_uid
@@ -157,15 +157,15 @@ class TestPlanExecution:
         old_history_uid = old_status.plan_history_uid
         old_history_size = old_status.items_in_history
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
-        await client.post("/queue/re_pause?option=immediate")
+        await client.post("/queue/re/pause?option=immediate")
         await wait_for_run_engine_paused(client)
         await client.post(f"/queue/{route_name}")
         await wait_until_item_ran(client, old_history_uid, old_history_size)
 
-        response = await client.get("/queue/history_get")
+        response = await client.get("/queue/history/get")
         assert response.status_code == 200
 
         history = HistoryItem.model_validate(response.json()["items"][0])
@@ -174,24 +174,24 @@ class TestPlanExecution:
 
     async def test_bad_stuck_plan(self, client: httpx.AsyncClient):
         item = QueueItem(name="bad_stuck_plan")
-        request_body = item.model_dump(mode="json")
-        await client.post("/queue/queue_item_add", json=request_body)
+        request_body = {"item": item.model_dump(mode="json")}
+        await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         old_queue_uid = old_status.plan_queue_uid
         old_queue_size = old_status.items_in_queue
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         await wait_for_queue_start(client, old_queue_uid, old_queue_size)
 
         # The plan doesn't allow the asyncio event loop to run, so this shouldn't work.
-        await client.post("/queue/re_pause?option=immediate")
+        await client.post("/queue/re/pause?option=immediate")
 
         with pytest.raises(TimeoutError):
             await wait_for_run_engine_paused(client, timeout=3.0)
 
-        await client.post("/queue/environment_destroy")
+        await client.post("/queue/environment/destroy")
 
         await wait_for_idle(client)
 
@@ -199,18 +199,18 @@ class TestPlanExecution:
 async def test_queue_run_instruction(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         for _ in range(3):
-            assert_response(await client.post("/queue/queue_item_add", json=request_body))
+            assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
         instruction_item = QueueItem(name="queue_stop", item_type="instruction")
-        instruction_item_request = instruction_item.model_dump(mode="json")
-        assert_response(await client.post("/queue/queue_item_add", json=instruction_item_request))
+        instruction_item_request = {"item": instruction_item.model_dump(mode="json")}
+        assert_response(await client.post("/queue/queue/item/add", json=instruction_item_request))
 
         for _ in range(3):
-            assert_response(await client.post("/queue/queue_item_add", json=request_body))
+            assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -237,11 +237,11 @@ async def test_queue_run_instruction(client: httpx.AsyncClient):
         assert status.worker_environment_state == "idle"
         assert status.running_item_uid is None
 
-        last_history = HistoryResponse.model_validate((await client.get("/queue/history_get?limit=1")).json())
+        last_history = HistoryResponse.model_validate((await client.get("/queue/history/get?limit=1")).json())
         instruction_item = last_history.items[0]
         assert instruction_item.type == "instruction"
         assert instruction_item.name == "queue_stop"
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         await wait_status_change(client, wait_history_change(7))

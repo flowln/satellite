@@ -10,6 +10,7 @@ from satellite.models import (
     LatestConsoleResponse,
     ManagerStatus,
     QueueItem,
+    RunEngineRunsResponse,
 )
 from satellite.server.persistence import RedisPersistenceBackend
 
@@ -26,8 +27,8 @@ async def test_ping(client):
 async def test_queue_add_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
-        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        request_body = {"item": item.model_dump(mode="json")}
+        response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
     response_body = response.json()
     assert response_body["qsize"] == 1
@@ -39,9 +40,9 @@ async def test_queue_add_simple(client: httpx.AsyncClient):
 async def test_queue_add_count(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="count", args=[["rand"]], kwargs={"num": 10})
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
-        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
     response_body = response.json()
     assert response_body["qsize"] == 1
@@ -53,8 +54,8 @@ async def test_queue_add_count(client: httpx.AsyncClient):
 async def test_queue_add_non_existing(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="this_is_not_a_plan")
-        request_body = item.model_dump(mode="json")
-        response = await client.post("/queue/queue_item_add", json=request_body)
+        request_body = {"item": item.model_dump(mode="json")}
+        response = await client.post("/queue/queue/item/add", json=request_body)
 
     assert response.status_code == 200
 
@@ -66,16 +67,16 @@ async def test_queue_add_non_existing(client: httpx.AsyncClient):
 async def test_queue_remove_by_uid(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
-        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
         assert response_body["qsize"] == 1
 
     added_item = QueueItem.model_validate(response_body["item"])
     assert added_item.uid is not None
 
-    response = assert_response(await client.post(f"/queue/queue_item_remove?uid={added_item.uid}"))
+    response = assert_response(await client.post(f"/queue/queue/item/remove?uid={added_item.uid}"))
     response_body = response.json()
     assert response_body["qsize"] == 0
 
@@ -86,40 +87,40 @@ async def test_queue_remove_by_uid(client: httpx.AsyncClient):
 async def test_queue_remove_by_position(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
-        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
         assert response_body["qsize"] == 1
 
         first_uid = QueueItem.model_validate(response_body["item"]).uid
 
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
-        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
         assert response_body["qsize"] == 2
 
         second_uid = QueueItem.model_validate(response_body["item"]).uid
 
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
-        response = assert_response(await client.post("/queue/queue_item_add", json=request_body))
+        response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
         assert response_body["qsize"] == 3
 
         third_uid = QueueItem.model_validate(response_body["item"]).uid
 
-    response = assert_response(await client.post("/queue/queue_item_remove?pos=1"))
+    response = assert_response(await client.post("/queue/queue/item/remove?pos=1"))
     response_body = response.json()
     assert response_body["qsize"] == 2
 
     removed_item = QueueItem.model_validate(response_body["item"])
     assert removed_item.uid == second_uid, (first_uid, second_uid, third_uid)
 
-    response = assert_response(await client.post("/queue/queue_item_remove?pos=back"))
+    response = assert_response(await client.post("/queue/queue/item/remove?pos=back"))
     response_body = response.json()
     assert response_body["qsize"] == 1
 
@@ -130,13 +131,13 @@ async def test_queue_remove_by_position(client: httpx.AsyncClient):
 async def test_queue_run_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
-        await client.post("/queue/queue_item_add", json=request_body)
+        request_body = {"item": item.model_dump(mode="json")}
+        await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         old_queue_uid = old_status.plan_queue_uid
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -162,14 +163,14 @@ async def test_queue_run_simple(client: httpx.AsyncClient):
 async def test_history_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
-        await client.post("/queue/queue_item_add", json=request_body)
+        request_body = {"item": item.model_dump(mode="json")}
+        await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         old_queue_uid = old_status.plan_queue_uid
         old_history_uid = old_status.plan_history_uid
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -199,7 +200,7 @@ async def test_history_simple(client: httpx.AsyncClient):
 
         await wait_status_change(client, wait_history_change())
 
-    response = await client.get("/queue/history_get")
+    response = await client.get("/queue/history/get")
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1, response.json()
 
@@ -211,11 +212,11 @@ async def test_history_simple(client: httpx.AsyncClient):
 async def test_queue_run_in_sequence(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         for _ in range(7):
-            await client.post("/queue/queue_item_add", json=request_body)
+            await client.post("/queue/queue/item/add", json=request_body)
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         response = await client.get("/queue/status")
         assert response.status_code == 200
@@ -238,7 +239,7 @@ async def test_queue_run_in_sequence(client: httpx.AsyncClient):
         await wait_status_change(client, wait_history_change(1))
         await wait_status_change(client, wait_history_change(2))
 
-        assert_response(await client.post("/queue/queue_stop"))
+        assert_response(await client.post("/queue/queue/stop"))
 
         # Run until the end of the current run
         await wait_status_change(client, wait_history_change(3))
@@ -247,12 +248,12 @@ async def test_queue_run_in_sequence(client: httpx.AsyncClient):
         status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         assert status.worker_environment_state == "idle"
 
-        assert_response(await client.post("/queue/queue_start"))
+        assert_response(await client.post("/queue/queue/start"))
 
         await wait_status_change(client, wait_history_change(5))
 
-        assert_response(await client.post("/queue/queue_stop"))
-        assert_response(await client.post("/queue/queue_stop_cancel"))
+        assert_response(await client.post("/queue/queue/stop"))
+        assert_response(await client.post("/queue/queue/stop/cancel"))
 
         await wait_status_change(client, wait_history_change(7))
 
@@ -351,3 +352,70 @@ async def test_console_output_update(client: httpx.AsyncClient):
 
         message = "Server started successfully!"
         assert not any(message in _line for _line in console_obj.lines), console_obj.lines
+
+
+async def test_open_environment_twice(client):
+    async with open_environment(client):
+        pass
+
+    async with open_environment(client):
+        pass
+
+
+async def test_run_uids(client: httpx.AsyncClient):
+    async with open_environment(client):
+        item = QueueItem(name="plan_with_various_runs")
+        request_body = {"item": item.model_dump(mode="json")}
+        await client.post("/queue/queue/item/add", json=request_body)
+
+        _status = (await client.get("/queue/re/runs")).json()
+        model = RunEngineRunsResponse.model_validate(_status)
+        old_run_list_uid = model.uid
+
+        assert_response(await client.post("/queue/queue/start"))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+
+        status = ManagerStatus.model_validate(response.json())
+        assert status.worker_environment_exists
+
+        _current_run_list_uid = None
+
+        async def wait_run_list_change(option: str, number_of_elements: int):
+            nonlocal _current_run_list_uid
+            while True:
+                _status = (await client.get("/queue/re/runs", params={"option": option})).json()
+                _model = RunEngineRunsResponse.model_validate(_status)
+
+                if str(_model.uid) == str(old_run_list_uid):
+                    await asyncio.sleep(0.05)
+
+                    continue
+
+                assert len(_model.runs) == number_of_elements, _model
+                _current_run_list_uid = _model.uid
+
+                break
+
+        await wait_status_change(client, wait_run_list_change("active", 1))
+        await wait_status_change(client, wait_run_list_change("open", 1))
+        await wait_status_change(client, wait_run_list_change("closed", 0))
+
+        old_run_list_uid = _current_run_list_uid
+
+        await wait_status_change(client, wait_run_list_change("active", 1))
+        await wait_status_change(client, wait_run_list_change("open", 0))
+        await wait_status_change(client, wait_run_list_change("closed", 1))
+
+        old_run_list_uid = _current_run_list_uid
+
+        await wait_status_change(client, wait_run_list_change("active", 2))
+        await wait_status_change(client, wait_run_list_change("open", 1))
+        await wait_status_change(client, wait_run_list_change("closed", 1))
+
+        old_run_list_uid = _current_run_list_uid
+
+        await wait_status_change(client, wait_run_list_change("active", 2))
+        await wait_status_change(client, wait_run_list_change("open", 0))
+        await wait_status_change(client, wait_run_list_change("closed", 2))

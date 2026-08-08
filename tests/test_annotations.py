@@ -48,9 +48,10 @@ def test_annotate_plan_with_pos_arg():
     annotation = generate_annotation_for_plan(_plan, "_plan")
 
     assert annotation.plan_name == "_plan"
-    assert "return_value" in annotation.arguments
-    assert annotation.arguments["return_value"].kind == Kind.POSITIONAL_OR_KEYWORD
-    assert annotation.arguments["return_value"].annotation is int
+    argument = annotation.get_argument_with_name("return_value")
+    assert argument is not None
+    assert argument.kind == Kind.POSITIONAL_OR_KEYWORD
+    assert argument.annotation is int
 
 
 def test_validate_plan_with_pos_arg():
@@ -83,30 +84,30 @@ def test_annotate_bluesky_scan():
     annotation = generate_annotation_for_plan(bp.scan, "scan")
     assert annotation.plan_name == "scan"
 
-    key = "detectors"
-    assert key in annotation.arguments
-    assert annotation.arguments[key].kind == Kind.POSITIONAL_OR_KEYWORD
-    assert annotation.arguments[key].required
+    argument = annotation.get_argument_with_name("detectors")
+    assert argument is not None
+    assert argument.kind == Kind.POSITIONAL_OR_KEYWORD
+    assert argument.required
 
-    key = "args"
-    assert key in annotation.arguments
-    assert annotation.arguments[key].kind == Kind.VAR_POSITIONAL
-    assert annotation.arguments[key].required
+    argument = annotation.get_argument_with_name("args")
+    assert argument is not None
+    assert argument.kind == Kind.VAR_POSITIONAL
+    assert argument.required
 
-    key = "num"
-    assert key in annotation.arguments
-    assert annotation.arguments[key].kind == Kind.KEYWORD_ONLY
-    assert not annotation.arguments[key].required
+    argument = annotation.get_argument_with_name("num")
+    assert argument is not None
+    assert argument.kind == Kind.KEYWORD_ONLY
+    assert not argument.required
 
-    key = "per_step"
-    assert key in annotation.arguments
-    assert annotation.arguments[key].kind == Kind.KEYWORD_ONLY
-    assert not annotation.arguments[key].required
+    argument = annotation.get_argument_with_name("per_step")
+    assert argument is not None
+    assert argument.kind == Kind.KEYWORD_ONLY
+    assert not argument.required
 
-    key = "md"
-    assert key in annotation.arguments
-    assert annotation.arguments[key].kind == Kind.KEYWORD_ONLY
-    assert not annotation.arguments[key].required
+    argument = annotation.get_argument_with_name("md")
+    assert argument is not None
+    assert argument.kind == Kind.KEYWORD_ONLY
+    assert not argument.required
 
 
 def test_validate_bluesky_scan(sim_readable, sim_movable):
@@ -171,3 +172,65 @@ def test_validate_from_string_wrong(sim_readable, sim_movable):
             {},
             device_annotations=device_annotations,
         )
+
+
+def test_serialize_like_queueserver():
+    bp = pytest.importorskip("bluesky.plans")
+
+    annotation = generate_annotation_for_plan(bp.scan, "scan")
+    serialized = annotation.model_dump(mode="json")
+
+    assert serialized.get("name") == "scan", serialized
+    assert "Scan over one multi-motor trajectory" in serialized.get("description"), serialized
+
+    expected_plan_names = {arg.name for arg in annotation.arguments}
+    for parameter in serialized.get("parameters", {}):
+        parameter_name = parameter.get("name")
+        assert parameter_name in expected_plan_names
+
+        match parameter_name:
+            case "detectors":
+                assert parameter.get("annotation", {}).get("type") == "collections.abc.Sequence[__READABLE__]"
+                assert parameter.get("kind", {}).get("name") == "POSITIONAL_OR_KEYWORD"
+                assert parameter.get("kind", {}).get("value") == 1
+                assert parameter.get("is_list", False), parameter
+                assert not parameter.get("is_optional", True), parameter
+            case "args":
+                assert parameter.get("annotation", {}).get("type") == "__MOVABLE__ | typing.Any"
+                assert parameter.get("kind", {}).get("name") == "VAR_POSITIONAL"
+                assert parameter.get("is_list", False), parameter
+                assert not parameter.get("is_optional", True), parameter
+            case "num":
+                assert parameter.get("annotation", {}).get("type") == "int | None"
+                assert parameter.get("kind", {}).get("name") == "KEYWORD_ONLY"
+                assert not parameter.get("is_list", True), parameter
+                assert parameter.get("default", "not present") is None
+                assert parameter.get("is_optional", False), parameter
+            case "per_step":
+                assert parameter.get("kind", {}).get("name") == "KEYWORD_ONLY"
+                assert not parameter.get("is_list", True), parameter
+                assert parameter.get("default", "not present") is None
+                assert parameter.get("is_optional", False), parameter
+            case "md":
+                assert parameter.get("kind", {}).get("name") == "KEYWORD_ONLY"
+                assert not parameter.get("is_list", True), parameter
+                assert parameter.get("default", "not present") is None
+                assert parameter.get("is_optional", False), parameter
+
+    bpp = pytest.importorskip("bluesky.protocols")
+
+    def _plan(_readable: bpp.Readable):
+        yield
+
+    annotation = generate_annotation_for_plan(_plan, "_plan")
+    serialized = annotation.model_dump(mode="json")
+
+    assert serialized.get("name") == "_plan", serialized
+    assert serialized.get("description") is not None, serialized
+
+    parameters = serialized.get("parameters", [])
+    assert len(parameters) == 1
+    parameter = parameters[0]
+
+    assert parameter["name"] == "_readable"
+    assert parameter["annotation"]["type"] == "__READABLE__"

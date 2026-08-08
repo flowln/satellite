@@ -6,6 +6,8 @@ from uuid import UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from satellite.annotations import DeviceAnnotation, PlanAnnotation
+
 
 def create_timed_uuid(base_uuid: UUID, time: dt.datetime) -> UUID:
     """Create a UUID referent to the given datetime object."""
@@ -149,12 +151,22 @@ class QueueItem(BaseModel):
     - 'queue_stop': Stop automatic execution of the queue at this point.
     """
 
+    creation_user: str = Field(default="<no user>")
+    """User that created this item originally."""
+    creation_user_group: str | None = Field(default="<no user group>")
+    """Group of the user that created this item originally, if the user belongs to one."""
+
+    last_modification_user: str = Field(alias="user", default="<no user>")
+    """Name of the user who last created / modified this item."""
+    last_modification_user_group: str | None = Field(alias="user_group", default="<no user group>")
+    """Group of the user who last created / modified this item, if the user belongs to one."""
+
     args: list[Any] = []
     """Positional arguments to the operation this item represents."""
     kwargs: dict[str, Any] = {}
     """Keyword arguments to the operation this item represents."""
 
-    metadata: dict[str, Any] = Field(alias="meta", default_factory=lambda: {})
+    metadata: dict[str, Any] = Field(alias="meta", default={})
     """Optional metadata associated with this item."""
 
     @classmethod
@@ -201,8 +213,8 @@ class GenericResponse(BaseModel):
 class QueueResponse(GenericResponse):
     """Data returned by the 'queue_get' API endpoint."""
 
-    items: Sequence[UUID]
-    """List of item UIDs currently in the queue, ordered from first to last."""
+    items: list[QueueItem]
+    """List of items currently in the queue, ordered from first to last."""
 
     running_item: dict = {}
     """Parameters of the currently running item. Empty if no item is currently running."""
@@ -231,10 +243,23 @@ class QueueAddRemoveResponse(GenericResponse):
     """The inserted / removed item, with the 'uid' attribute filled in. If 'success' = False, None is returned."""
 
 
+class RunEngineRunsResponse(GenericResponse):
+    """Data returned by the 're/runs' API endpoint."""
+
+    uid: UUID = Field(alias="run_list_uid")
+    """Unique identifier for the current run list state."""
+
+    runs: Sequence[UUID] = Field(alias="run_list", default=[])
+    """List of run UUIDs matching the specified requirements."""
+
+
 class LatestConsoleResponse(GenericResponse):
     """Data returned by the 'console_output' API endpoint."""
 
-    lines: Sequence[str] = Field(default=[])
+    uid: UUID = Field(alias="last_msg_uid")
+    """Unique identifier for the current state of the console."""
+
+    lines: Sequence[str] = Field(alias="console_output_msgs", default=[])
     """Text lines of past console output."""
 
 
@@ -243,3 +268,23 @@ class ConsoleUidResponse(GenericResponse):
 
     uid: UUID
     """Unique identifier for the current state of the console."""
+
+
+class AllowedPlansResponse(GenericResponse):
+    """Data returned by the '/plans/allowed' API endpoint."""
+
+    uid: UUID = Field(alias="plans_allowed_uid")
+    """Unique identifier for the current list of allowed plans."""
+
+    items: dict[str, PlanAnnotation] = Field(alias="plans_allowed", default={})
+    """Dictionary of (plan name -> plan annotation) allowed for the current user group."""
+
+
+class AllowedDevicesResponse(GenericResponse):
+    """Data returned by the '/devices/allowed' API endpoint."""
+
+    uid: UUID = Field(alias="devices_allowed_uid")
+    """Unique identifier for the current list of allowed devices."""
+
+    items: dict[str, DeviceAnnotation] = Field(alias="devices_allowed", default={})
+    """Dictionary of (device name -> device annotation) allowed for the current user group."""

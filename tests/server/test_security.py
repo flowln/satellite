@@ -154,15 +154,15 @@ class TestAuthenticator:
         assert response.status_code == 401
 
     async def test_with_configuration_wrong_password(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "ed", "password": "wrong"})
+        response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "wrong"})
         assert response.status_code == 400
 
     async def test_with_configuration_wrong_user(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "sophie", "password": "wrong"})
+        response = await client.post("/auth/provider/test/login", data={"username": "sophie", "password": "wrong"})
         assert response.status_code == 400
 
     async def test_with_configuration_accept_request(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "ed", "password": "123"})
+        response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert response.status_code == 200, response.json()
 
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
@@ -174,10 +174,10 @@ class TestAuthenticator:
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 200, response.json()
 
-        response = await client.post("/login", data={"username": "molly", "password": "123"})
+        response = await client.post("/auth/provider/test/login", data={"username": "molly", "password": "123"})
         assert response.status_code == 400
 
-        response = await client.post("/login", data={"username": "molly", "password": "456"})
+        response = await client.post("/auth/provider/test/login", data={"username": "molly", "password": "456"})
         assert response.status_code == 200, response.json()
 
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
@@ -189,7 +189,7 @@ class TestAuthenticator:
         assert response.status_code == 200, response.json()
 
     async def test_with_configuration_token_invalid_signature(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "ed", "password": "123"})
+        response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert response.status_code == 200, response.json()
 
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
@@ -202,7 +202,9 @@ class TestAuthenticator:
         assert response.status_code == 401
 
     async def test_with_configuration_token_expiration(self, client: httpx.AsyncClient):
-        response = await client.post("/login?override_expiration_time=2", data={"username": "ed", "password": "123"})
+        response = await client.post(
+            "/auth/provider/test/login?override_expiration_time=2", data={"username": "ed", "password": "123"}
+        )
         assert response.status_code == 200, response.json()
         _return_time = ttime.time()
 
@@ -224,7 +226,7 @@ class TestAuthenticator:
         assert response.status_code == 401
 
     async def test_with_configuration_token_revoke(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "ed", "password": "123"})
+        response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert response.status_code == 200, response.json()
 
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
@@ -233,14 +235,16 @@ class TestAuthenticator:
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 200, response.json()
 
-        response = await client.post("/logout", headers={"Authorization": f"Bearer {parsed_response.token}"})
+        response = await client.post(
+            "/auth/provider/test/logout", headers={"Authorization": f"Bearer {parsed_response.token}"}
+        )
         assert response.status_code == 200, response.json()
 
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 401
 
     async def test_with_configuration_token_revoke_refresh(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "ed", "password": "123"})
+        response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert response.status_code == 200, response.json()
 
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
@@ -249,22 +253,28 @@ class TestAuthenticator:
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 200, response.json()
 
-        response = await client.post("/logout", headers={"Authorization": f"Bearer {parsed_response.token}"})
+        response = await client.post(
+            "/auth/provider/test/logout", headers={"Authorization": f"Bearer {parsed_response.token}"}
+        )
         assert response.status_code == 200, response.json()
 
         response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_response.token}"})
         assert response.status_code == 401
 
-        response = await client.post("/logout", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"})
+        response = await client.post(
+            "/auth/provider/test/logout", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
+        )
         assert response.status_code == 200, response.json()
 
         new_tokens_response = await client.post(
-            "/session_refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
+            "/auth/session/refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
         )
         assert new_tokens_response.status_code == 401
 
     async def test_with_configuration_token_refresh(self, client: httpx.AsyncClient):
-        response = await client.post("/login?override_expiration_time=2", data={"username": "ed", "password": "123"})
+        response = await client.post(
+            "/auth/provider/test/login?override_expiration_time=2", data={"username": "ed", "password": "123"}
+        )
         assert response.status_code == 200, response.json()
         _return_time = ttime.time()
 
@@ -286,7 +296,7 @@ class TestAuthenticator:
         assert response.status_code == 401
 
         new_tokens_response = await client.post(
-            "/session_refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
+            "/auth/session/refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
         )
         assert new_tokens_response.status_code == 200
 
@@ -301,12 +311,12 @@ class TestAuthenticator:
 
         # Assert the old refresh token doesn't work anymore
         new_tokens_response = await client.post(
-            "/session_refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
+            "/auth/session/refresh", headers={"Authorization": f"Bearer {parsed_response.refresh_token}"}
         )
         assert new_tokens_response.status_code == 401
 
     async def test_with_configuration_whoami(self, client: httpx.AsyncClient):
-        response = await client.post("/login", data={"username": "ed", "password": "123"})
+        response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert response.status_code == 200, response.json()
 
         parsed_response = SuccessfulLoginResponse.model_validate(response.json())
@@ -470,17 +480,17 @@ class TestAPIAuthorization:
         yield request.getfixturevalue(request.param.__name__)
 
     async def test_whoami_with_scopes(self, client: httpx.AsyncClient):
-        ed_response = await client.post("/login", data={"username": "ed", "password": "123"})
+        ed_response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert ed_response.status_code == 200, ed_response.json()
 
         parsed_ed_response = SuccessfulLoginResponse.model_validate(ed_response.json())
 
-        molly_response = await client.post("/login", data={"username": "molly", "password": "456"})
+        molly_response = await client.post("/auth/provider/test/login", data={"username": "molly", "password": "456"})
         assert molly_response.status_code == 200, molly_response.json()
 
         parsed_molly_response = SuccessfulLoginResponse.model_validate(molly_response.json())
 
-        sophie_response = await client.post("/login", data={"username": "sophie", "password": "789"})
+        sophie_response = await client.post("/auth/provider/test/login", data={"username": "sophie", "password": "789"})
         assert sophie_response.status_code == 200, sophie_response.json()
 
         parsed_sophie_response = SuccessfulLoginResponse.model_validate(sophie_response.json())
@@ -507,30 +517,30 @@ class TestAPIAuthorization:
         assert "read:history" in sophie_whoami.scopes
 
     async def test_read_scope_validate(self, client: httpx.AsyncClient):
-        ed_response = await client.post("/login", data={"username": "ed", "password": "123"})
+        ed_response = await client.post("/auth/provider/test/login", data={"username": "ed", "password": "123"})
         assert ed_response.status_code == 200, ed_response.json()
 
         parsed_ed_response = SuccessfulLoginResponse.model_validate(ed_response.json())
 
-        molly_response = await client.post("/login", data={"username": "molly", "password": "456"})
+        molly_response = await client.post("/auth/provider/test/login", data={"username": "molly", "password": "456"})
         assert molly_response.status_code == 200, molly_response.json()
 
         parsed_molly_response = SuccessfulLoginResponse.model_validate(molly_response.json())
 
-        sophie_response = await client.post("/login", data={"username": "sophie", "password": "789"})
+        sophie_response = await client.post("/auth/provider/test/login", data={"username": "sophie", "password": "789"})
         assert sophie_response.status_code == 200, sophie_response.json()
 
         parsed_sophie_response = SuccessfulLoginResponse.model_validate(sophie_response.json())
 
         ed_response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_ed_response.token}"})
         assert ed_response.status_code == 200, ed_response.json()
-        ed_response = await client.get("/history_get", headers={"Authorization": f"Bearer {parsed_ed_response.token}"})
+        ed_response = await client.get("/history/get", headers={"Authorization": f"Bearer {parsed_ed_response.token}"})
         assert ed_response.status_code == 401
 
         molly_response = await client.get("/status", headers={"Authorization": f"Bearer {parsed_molly_response.token}"})
         assert molly_response.status_code == 401
         molly_response = await client.get(
-            "/history_get", headers={"Authorization": f"Bearer {parsed_molly_response.token}"}
+            "/history/get", headers={"Authorization": f"Bearer {parsed_molly_response.token}"}
         )
         assert molly_response.status_code == 200, molly_response.json()
 
@@ -539,7 +549,7 @@ class TestAPIAuthorization:
         )
         assert sophie_response.status_code == 200
         sophie_response = await client.get(
-            "/history_get", headers={"Authorization": f"Bearer {parsed_sophie_response.token}"}
+            "/history/get", headers={"Authorization": f"Bearer {parsed_sophie_response.token}"}
         )
         assert sophie_response.status_code == 200, sophie_response.json()
 
@@ -595,7 +605,7 @@ class TestResourceAuthorization:
         yield request.getfixturevalue(request.param.__name__)
 
     async def get_token(self, client: httpx.AsyncClient, username: str, password: str) -> str:
-        response = await client.post("/login", data={"username": username, "password": password})
+        response = await client.post("/auth/provider/test/login", data={"username": username, "password": password})
         assert response.status_code == 200, response.json()
 
         return SuccessfulLoginResponse.model_validate(response.json()).token
@@ -643,45 +653,45 @@ class TestResourceAuthorization:
         ed_token = await self.get_token(client, "ed", "123")
 
         item = QueueItem(name="simple_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
-            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
+            "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
         )
         assert "doesn't have access" not in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_some_other_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
-            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
+            "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
         )
         assert "doesn't have access" in response.json().get("msg", ""), response.json()
 
         molly_token = await self.get_token(client, "molly", "456")
 
         item = QueueItem(name="simple_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
-            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+            "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_some_other_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
-            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+            "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" not in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_prohibited_123")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
-            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+            "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" not in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_prohibited")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
-            "/queue_item_add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
+            "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" in response.json().get("msg", ""), response.json()

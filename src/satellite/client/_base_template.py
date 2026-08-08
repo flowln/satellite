@@ -38,6 +38,8 @@ from uuid import UUID
 import httpx
 
 from satellite.models import (
+    AllowedDevicesResponse,
+    AllowedPlansResponse,
     ConsoleUidResponse,
     GenericResponse,
     HistoryResponse,
@@ -46,6 +48,7 @@ from satellite.models import (
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
+    RunEngineRunsResponse,
     SuccessfulLoginResponse,
     UserInformation,
 )

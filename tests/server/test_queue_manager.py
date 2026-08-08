@@ -52,6 +52,47 @@ async def test_queue_add_remove_in_batch(client: httpx.AsyncClient):
         assert response.json()["qsize"] == 3
 
 
+async def test_queue_move_item(client: httpx.AsyncClient):
+    async with open_environment(client):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"items": [item.model_dump(mode="json")] * 3}
+
+        response = assert_response(await client.post("/queue/queue/item/add/batch", json=request_body))
+        assert response.json()["qsize"] == 3
+
+    item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+    response = assert_response(
+        await client.post("/queue/queue/item/move", params={"uid": item_uids[0], "after_uid": item_uids[2]})
+    )
+    assert response.json()["item"]["item_uid"] == item_uids[0]
+
+    response = assert_response(await client.get("/queue/queue/get"))
+    new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+    assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
+
+    item_uids = new_item_uids
+
+    response = assert_response(await client.post("/queue/queue/item/move", params={"uid": item_uids[1], "pos_dest": 0}))
+    assert response.json()["item"]["item_uid"] == item_uids[1]
+
+    response = assert_response(await client.get("/queue/queue/get"))
+    new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+    assert new_item_uids == [item_uids[1], item_uids[0], item_uids[2]]
+
+    item_uids = new_item_uids
+
+    response = assert_response(await client.post("/queue/queue/item/move", params={"pos": "front", "pos_dest": "back"}))
+    assert response.json()["item"]["item_uid"] == item_uids[0]
+
+    response = assert_response(await client.get("/queue/queue/get"))
+    new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+    assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
+
+
 async def test_queue_add_count(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="count", args=[["rand"]], kwargs={"num": 10})

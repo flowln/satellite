@@ -4,6 +4,7 @@ import json
 import logging
 import time as ttime
 from typing import Any, Literal, cast
+from uuid import UUID
 
 import httpx
 import pydantic
@@ -60,6 +61,9 @@ class OAuthAuthentication(httpx.Auth):
 def _serialize_value(value: Any) -> tuple[Literal["query", "body"], str | list | dict]:
     if isinstance(value, pydantic.BaseModel):
         return "body", value.model_dump(mode="json")
+    elif isinstance(value, (str, UUID)):
+        # NOTE: Strings and UUIDs are considered as implementing the Sequence protocol, so we must special-case it.
+        return "query", str(value)
     elif isinstance(value, Sequence):
         return "body", [_serialize_value(_v)[1] for _v in value]
     else:

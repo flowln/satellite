@@ -6,7 +6,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Annotated, Any, Literal, cast, no_type_check
+from typing import Annotated, Any, Literal, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
 from fastapi import APIRouter, Body, Query, Security
@@ -745,6 +745,62 @@ class QueueManager:
 
         return ret
 
+    async def _get_queue_position(
+        self, position: int | Literal["front", "back"] | None = None, uid: UUID | str | None = None
+    ) -> int | None:
+        """Common method for retrieving the index of a queue item."""
+        if uid is not None:
+            index, _ = await self._persistence_backend.queue_get_item(uuid=uid)
+            return index
+
+        if isinstance(position, int):
+            return position
+
+        match position:
+            case "front":
+                return 0
+            case "back":
+                return None
+            case None:
+                pass
+
+        raise RuntimeError("Failed to calculate queue position: Both 'position' and 'uid' are None.")
+
+    async def _parse_ending_queue_position(
+        self,
+        pos: int | Literal["front", "back"] | None = None,
+        before_uid: UUID | str | None = None,
+        after_uid: UUID | str | None = None,
+    ) -> tuple[GenericResponse, int | None]:
+        """Common method for parsing destination position arguments into a queue position index."""
+        ret = GenericResponse()
+
+        set_position_parameters = [_p for _p in {"pos", "before_uid", "after_uid"} if locals()[_p] is not None]
+        if len(set_position_parameters) != 1:
+            ret.success = False
+            ret.msg = "Failed to add item to queue: Exactly one of 'pos', 'before_uid' or 'after_uid' must be set."
+            return ret, None
+
+        try:
+            uid = before_uid or after_uid
+            index = await self._get_queue_position(position=pos, uid=uid)
+
+            if after_uid is not None and isinstance(index, int) and index == self._status.items_in_queue:
+                index = None
+        except Exception:
+            ret.success = False
+            ret.msg = f"Failed to add item to queue: No item with uid '{uid}' could be found."
+            return ret, None
+
+        if isinstance(index, int) and index >= self._status.items_in_queue:
+            ret.success = False
+            ret.msg = (
+                f"Failed to add item to queue: Position '{index}' is outside the range allowed in the current queue."
+            )
+            return ret, None
+
+        return ret, index
+
     @post_endpoint("/queue/item/add")
     async def queue_item_add(
         self,
@@ -815,35 +871,13 @@ class QueueManager:
 
         item.uid = create_uuid()
 
-        # Insert in the queue at the correct position
-        if before_uid is not None or after_uid is not None:
-            uid = cast(str, before_uid or after_uid)
+        parse_return, index = await self._parse_ending_queue_position(pos, before_uid, after_uid)
+        if not parse_return.success:
+            ret.success = parse_return.success
+            ret.msg = parse_return.msg
+            return ret
 
-            try:
-                position, _ = await self._persistence_backend.queue_get_item(uuid=uid)
-            except Exception:
-                ret.success = False
-                ret.msg = f"Failed to add item to queue: No item with uid '{uid}' could be found."
-                return ret
-
-            if after_uid is not None:
-                position += 1
-
-            await self._persistence_backend.queue_insert_item(item, position)
-        else:
-            match pos:
-                case "front":
-                    await self._persistence_backend.queue_insert_item(item, 0)
-                case "back":
-                    await self._persistence_backend.queue_insert_item(item, None)
-                case index:
-                    if index >= self._status.items_in_queue:
-                        ret.success = False
-                        ret.msg = "Failed to add item to queue:"
-                        f"Position '{index}' is outside the range allowed in the current queue."
-                        return ret
-
-                    await self._persistence_backend.queue_insert_item(item, index)
+        await self._persistence_backend.queue_insert_item(item, index)
 
         # Prepare return
         self._status.plan_queue_uid = create_uuid()
@@ -1052,6 +1086,84 @@ class QueueManager:
                 ret.items.append(item_return.item)
 
         ret.queue_size = self._status.items_in_queue
+        return ret
+
+    @post_endpoint("/queue/item/move", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    async def queue_item_move(
+        self,
+        original_position: Annotated[int | Literal["front", "back"] | None, Query(alias="pos")] = None,
+        uid: UUID | None = None,
+        destination_position: Annotated[int | Literal["front", "back"] | None, Query(alias="pos_dest")] = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Move an item to another position on the queue.
+
+        Parameters
+        ----------
+        pos : int, "back" or "front", optional
+            The original position of the item to move.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'uid'.
+        uid : UUID, optional
+            The unique identifier of the item to move.
+
+            This option cannot be specified at the same time as 'pos'.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        try:
+            original_index = await self._get_queue_position(position=original_position, uid=uid)
+        except RuntimeError as exc:
+            ret.success = False
+            ret.msg = str(exc)
+            return ret
+
+        parse_response, destination_index = await self._parse_ending_queue_position(
+            pos=destination_position, before_uid=before_uid, after_uid=after_uid
+        )
+        if not parse_response.success:
+            ret.success = parse_response.success
+            ret.msg = parse_response.msg
+            return ret
+
+        item = await self._persistence_backend.queue_pop_item(original_index)
+        await self._persistence_backend.queue_insert_item(item, destination_index)
+
+        ret.queue_size = self._status.items_in_queue
+        ret.item = item
+
         return ret
 
     @post_endpoint("/queue/start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])

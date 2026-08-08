@@ -163,6 +163,79 @@ async def test_queue_add_remove_batch(python_client: AsyncClient):
     assert status.manager_state == "idle"
 
 
+async def test_queue_item_move(python_client: AsyncClient):
+    response = await python_client.environment_open()
+    assert response.success, response.msg
+
+    await python_client.wait_for_idle(timeout=5)
+    status = await python_client.status()
+    assert status.manager_state == "idle"
+
+    try:
+        item = QueueItem(name="simple_plan", args=["rand"])
+        response = await python_client.queue_item_add_batch([item] * 3)
+        assert response.success, response.msg
+
+        assert response.items is not None
+        item_uids = [_i.uid for _i in response.items]
+
+        # Move first to next after last
+        response = await python_client.queue_item_move(pos=0, after_uid=str(item_uids[2]))
+        assert response.success, response.msg
+
+        assert response.item is not None and response.item.uid == item_uids[0]
+
+        response = await python_client.queue_get()
+        assert response.success, response.msg
+
+        new_item_uids = [_i.uid for _i in response.items]
+
+        assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
+
+        item_uids = new_item_uids
+
+        # Move item in the middle to first
+        response = await python_client.queue_item_move(uid=item_uids[1], pos_dest=0)
+        assert response.success, response.msg
+
+        assert response.item is not None and response.item.uid == item_uids[1]
+
+        response = await python_client.queue_get()
+        assert response.success, response.msg
+
+        new_item_uids = [_i.uid for _i in response.items]
+
+        assert new_item_uids == [item_uids[1], item_uids[0], item_uids[2]]
+
+        item_uids = new_item_uids
+
+        # Move front to back
+        response = await python_client.queue_item_move(pos="front", pos_dest="back")
+        assert response.success, response.msg
+
+        assert response.item is not None and response.item.uid == item_uids[0]
+
+        response = await python_client.queue_get()
+        assert response.success, response.msg
+
+        new_item_uids = [_i.uid for _i in response.items]
+
+        assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
+    finally:
+        response = await python_client.queue_clear()
+        assert response.success, response.msg
+
+        response = await python_client.history_clear()
+        assert response.success, response.msg
+
+    response = await python_client.environment_close()
+    assert response.success, response.msg
+
+    await python_client.wait_for_idle(timeout=5)
+    status = await python_client.status()
+    assert status.manager_state == "idle"
+
+
 @pytest.fixture
 async def python_client_with_auth(monkeypatch, tmp_path):
     configuration = ManagerConfiguration()

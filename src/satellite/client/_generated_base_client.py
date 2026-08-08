@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-08T21:20+00:00
-Git revision: 12ae378f52aa6310ae67b19af4d9714fa339f145
+Date: 2026-08-08T23:29+00:00
+Git revision: f57d765124d63a35f6f49e0d3cfd53f9fdf0c670
 """
 
 from abc import abstractmethod
@@ -420,6 +420,82 @@ class BaseAsyncClient(httpx.AsyncClient):
         response = await self.post_implementation("/queue/item/remove/batch", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_move(
+        self,
+        pos: int | Literal["front", "back"] | None = None,
+        uid: UUID | None = None,
+        pos_dest: int | Literal["front", "back"] | None = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Move an item to another position on the queue.
+
+        Parameters
+        ----------
+        pos : int, "back" or "front", optional
+            The original position of the item to move.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'uid'.
+        uid : UUID, optional
+            The unique identifier of the item to move.
+
+            This option cannot be specified at the same time as 'pos'.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {
+            "pos": None,
+            "uid": None,
+            "pos_dest": None,
+            "before_uid": None,
+            "after_uid": None,
+            "lock_key": None,
+        }
+        original_parameters = {
+            "pos": pos,
+            "uid": uid,
+            "pos_dest": pos_dest,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/move", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
     async def queue_start(self, lock_key: str | None = None) -> GenericResponse:
@@ -1107,6 +1183,82 @@ class BaseSyncClient:
         response = self.post_implementation("/queue/item/remove/batch", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_move(
+        self,
+        pos: int | Literal["front", "back"] | None = None,
+        uid: UUID | None = None,
+        pos_dest: int | Literal["front", "back"] | None = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Move an item to another position on the queue.
+
+        Parameters
+        ----------
+        pos : int, "back" or "front", optional
+            The original position of the item to move.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'uid'.
+        uid : UUID, optional
+            The unique identifier of the item to move.
+
+            This option cannot be specified at the same time as 'pos'.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {
+            "pos": None,
+            "uid": None,
+            "pos_dest": None,
+            "before_uid": None,
+            "after_uid": None,
+            "lock_key": None,
+        }
+        original_parameters = {
+            "pos": pos,
+            "uid": uid,
+            "pos_dest": pos_dest,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/move", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
     def queue_start(self, lock_key: str | None = None) -> GenericResponse:

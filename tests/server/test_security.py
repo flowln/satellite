@@ -653,14 +653,14 @@ class TestResourceAuthorization:
         ed_token = await self.get_token(client, "ed", "123")
 
         item = QueueItem(name="simple_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
             "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
         )
         assert "doesn't have access" not in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_some_other_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
             "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {ed_token}"}
         )
@@ -669,28 +669,28 @@ class TestResourceAuthorization:
         molly_token = await self.get_token(client, "molly", "456")
 
         item = QueueItem(name="simple_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
             "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_some_other_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
             "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" not in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_prohibited_123")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
             "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )
         assert "doesn't have access" not in response.json().get("msg", ""), response.json()
 
         item = QueueItem(name="_prohibited")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post(
             "/queue/item/add", json=request_body, headers={"Authorization": f"Bearer {molly_token}"}
         )

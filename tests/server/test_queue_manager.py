@@ -27,7 +27,7 @@ async def test_ping(client):
 async def test_queue_add_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
     response_body = response.json()
@@ -40,7 +40,7 @@ async def test_queue_add_simple(client: httpx.AsyncClient):
 async def test_queue_add_count(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="count", args=[["rand"]], kwargs={"num": 10})
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
         response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
@@ -54,7 +54,7 @@ async def test_queue_add_count(client: httpx.AsyncClient):
 async def test_queue_add_non_existing(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="this_is_not_a_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         response = await client.post("/queue/queue/item/add", json=request_body)
 
     assert response.status_code == 200
@@ -67,7 +67,7 @@ async def test_queue_add_non_existing(client: httpx.AsyncClient):
 async def test_queue_remove_by_uid(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
         response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
@@ -87,7 +87,7 @@ async def test_queue_remove_by_uid(client: httpx.AsyncClient):
 async def test_queue_remove_by_position(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
         response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
@@ -96,7 +96,7 @@ async def test_queue_remove_by_position(client: httpx.AsyncClient):
         first_uid = QueueItem.model_validate(response_body["item"]).uid
 
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
         response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
@@ -105,7 +105,7 @@ async def test_queue_remove_by_position(client: httpx.AsyncClient):
         second_uid = QueueItem.model_validate(response_body["item"]).uid
 
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
 
         response = assert_response(await client.post("/queue/queue/item/add", json=request_body))
         response_body = response.json()
@@ -131,7 +131,7 @@ async def test_queue_remove_by_position(client: httpx.AsyncClient):
 async def test_queue_run_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
@@ -163,7 +163,7 @@ async def test_queue_run_simple(client: httpx.AsyncClient):
 async def test_history_simple(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
@@ -212,7 +212,7 @@ async def test_history_simple(client: httpx.AsyncClient):
 async def test_queue_run_in_sequence(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         for _ in range(7):
             await client.post("/queue/queue/item/add", json=request_body)
 
@@ -365,7 +365,7 @@ async def test_open_environment_twice(client):
 async def test_run_uids(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="plan_with_various_runs")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         await client.post("/queue/queue/item/add", json=request_body)
 
         _status = (await client.get("/queue/re/runs")).json()

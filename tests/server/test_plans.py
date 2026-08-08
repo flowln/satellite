@@ -118,7 +118,7 @@ class TestPlanExecution:
 
     async def test_failing_plan(self, client: httpx.AsyncClient):
         item = QueueItem(name="failing_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
@@ -148,7 +148,7 @@ class TestPlanExecution:
     )
     async def test_good_stuck_plan(self, client: httpx.AsyncClient, route_name: str, exit_status: str):
         item = QueueItem(name="good_stuck_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
@@ -174,7 +174,7 @@ class TestPlanExecution:
 
     async def test_bad_stuck_plan(self, client: httpx.AsyncClient):
         item = QueueItem(name="bad_stuck_plan")
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         await client.post("/queue/queue/item/add", json=request_body)
 
         old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
@@ -199,12 +199,12 @@ class TestPlanExecution:
 async def test_queue_run_instruction(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="simple_plan", args=["rand"])
-        request_body = item.model_dump(mode="json")
+        request_body = {"item": item.model_dump(mode="json")}
         for _ in range(3):
             assert_response(await client.post("/queue/queue/item/add", json=request_body))
 
         instruction_item = QueueItem(name="queue_stop", item_type="instruction")
-        instruction_item_request = instruction_item.model_dump(mode="json")
+        instruction_item_request = {"item": instruction_item.model_dump(mode="json")}
         assert_response(await client.post("/queue/queue/item/add", json=instruction_item_request))
 
         for _ in range(3):

@@ -688,7 +688,7 @@ class QueueManager:
         await self.check_environment_process()
 
         queue = await self._persistence_backend.queue_get()
-        items_in_queue = [item.uid for item in queue if item.uid is not None]
+        items_in_queue = [item for item in queue if item.uid is not None]
         return QueueResponse(items=items_in_queue, plan_queue_uid=self._status.plan_queue_uid)
 
     @post_endpoint("/queue/clear", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
@@ -714,7 +714,7 @@ class QueueManager:
     @post_endpoint("/queue/item/add")
     async def queue_item_add(
         self,
-        item: QueueItem,
+        item: Annotated[QueueItem, Body(embed=True)],
         pos: int | Literal["front", "back"] = "back",
         before_uid: str | None = None,
         after_uid: str | None = None,
@@ -797,9 +797,13 @@ class QueueManager:
                 return ret
 
         # Populate information
+        if item.uid is None:  # No UID means this item is (probably) fresh new
+            item.creation_user = user
+            item.creation_user_group = user_group
+        item.last_modification_user = user
+        item.last_modification_user_group = user_group
+
         item.uid = create_uuid()
-        item.metadata["user"] = user
-        item.metadata["user_group"] = user_group
 
         # Insert in the queue at the correct position
         if before_uid is not None or after_uid is not None:

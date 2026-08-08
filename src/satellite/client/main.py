@@ -9,28 +9,32 @@ import sys
 import click
 
 _GET_ASYNC_CODE = Template("""
-response = await self.get_implementation(\"$endpoint\"$combined_parameters)
+$get_parameters_expr
+response = await self.get_implementation(\"$endpoint\", **parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
 
 _POST_ASYNC_CODE = Template("""
-response = await self.post_implementation(\"$endpoint\"$combined_parameters)
+$get_parameters_expr
+response = await self.post_implementation(\"$endpoint\", **parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
 
 _GET_SYNC_CODE = Template("""
-response = self.get_implementation(\"$endpoint\"$combined_parameters)
+$get_parameters_expr
+response = self.get_implementation(\"$endpoint\", **parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
 
 _POST_SYNC_CODE = Template("""
-response = self.post_implementation(\"$endpoint\"$combined_parameters)
+$get_parameters_expr
+response = self.post_implementation(\"$endpoint\", **parameters)
 response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
@@ -82,21 +86,54 @@ def _parse_args_and_kwargs_from_node(node: ast.FunctionDef | ast.AsyncFunctionDe
     elif node.returns is not None:
         return_type_conversion = ""
 
-    args = node.args.args[:]
+    args = [_arg for _arg in node.args.args[:] if _arg.arg != "self"]
     if node.args.vararg is not None:
         args.append(node.args.vararg)
     kwargs = node.args.kwonlyargs[:]
     if node.args.kwarg is not None:
         kwargs.append(node.args.kwarg)
 
-    combined_parameters = ", ".join(
-        f"{_arg.arg}={_arg.arg}" for _arg in itertools.chain(args, kwargs) if _arg.arg != "self"
+    default_parameter_values = {}
+    for argument, argument_default in zip(
+        args[len(args) - len(node.args.defaults) :], node.args.defaults, strict=False
+    ):
+        if not isinstance(argument_default, ast.Constant):
+            continue
+        default_parameter_values[argument.arg] = argument_default.value
+    if node.args.kw_defaults is not None:
+        for argument, argument_default in zip(kwargs, node.args.kw_defaults[::-1], strict=False):
+            if not isinstance(argument_default, ast.Constant):
+                continue
+            default_parameter_values[argument.arg] = argument_default.value
+
+    all_parameters_dict = (
+        "original_parameters = {"
+        + ", ".join(f'"{_arg.arg}": {_arg.arg}' for _arg in itertools.chain(args, kwargs))
+        + "}"
     )
 
-    if len(combined_parameters) != 0:
-        combined_parameters = ", " + combined_parameters
+    # Fast path: if there's not parameters, avoid all the useless filtering
+    if all_parameters_dict == "original_parameters = {}":
+        return return_type_conversion, "parameters = {}"
 
-    return return_type_conversion, combined_parameters
+    get_parameters_expr = Template("""
+default_values = $default_parameter_values
+
+$all_parameters_dict
+parameters = original_parameters.copy()
+
+for arg_name in original_parameters.keys():
+    if arg_name not in default_values:
+        continue
+    if original_parameters[arg_name] == default_values[arg_name]:
+        del parameters[arg_name]
+
+""").substitute(
+        default_parameter_values=default_parameter_values,
+        all_parameters_dict=all_parameters_dict,
+    )
+
+    return return_type_conversion, get_parameters_expr
 
 
 def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, endpoint_type: str):
@@ -105,14 +142,14 @@ def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, en
 
     This function generates the code body of the method specified by 'node'.
     """
-    return_type_conversion, combined_parameters = _parse_args_and_kwargs_from_node(node)
+    return_type_conversion, get_parameters_expr = _parse_args_and_kwargs_from_node(node)
 
     match endpoint_type:
         case "GET":
             return ast.parse(
                 _GET_ASYNC_CODE.substitute(
                     endpoint=endpoint,
-                    combined_parameters=combined_parameters,
+                    get_parameters_expr=get_parameters_expr,
                     return_type_conversion=return_type_conversion,
                 )
             )
@@ -120,7 +157,7 @@ def _generate_async_implementation(node: ast.AsyncFunctionDef, endpoint: str, en
             return ast.parse(
                 _POST_ASYNC_CODE.substitute(
                     endpoint=endpoint,
-                    combined_parameters=combined_parameters,
+                    get_parameters_expr=get_parameters_expr,
                     return_type_conversion=return_type_conversion,
                 )
             )
@@ -136,14 +173,14 @@ def _generate_sync_implementation(node: ast.FunctionDef, endpoint: str, endpoint
 
     This function generates the code body of the method specified by 'node'.
     """
-    return_type_conversion, combined_parameters = _parse_args_and_kwargs_from_node(node)
+    return_type_conversion, get_parameters_expr = _parse_args_and_kwargs_from_node(node)
 
     match endpoint_type:
         case "GET":
             return ast.parse(
                 _GET_SYNC_CODE.substitute(
                     endpoint=endpoint,
-                    combined_parameters=combined_parameters,
+                    get_parameters_expr=get_parameters_expr,
                     return_type_conversion=return_type_conversion,
                 )
             )
@@ -151,7 +188,7 @@ def _generate_sync_implementation(node: ast.FunctionDef, endpoint: str, endpoint
             return ast.parse(
                 _POST_SYNC_CODE.substitute(
                     endpoint=endpoint,
-                    combined_parameters=combined_parameters,
+                    get_parameters_expr=get_parameters_expr,
                     return_type_conversion=return_type_conversion,
                 )
             )
@@ -174,6 +211,16 @@ def _clear_fastapi_dependencies_from_args(node: ast.AsyncFunctionDef) -> ast.Asy
         if is_single_element:
             arguments = [arguments]
 
+        def _remove_argument(idx):
+            if defaults_name is None:
+                return
+
+            default_list: list = getattr(node.args, defaults_name)
+            arg_idx_in_defaults = idx - (len(arguments) - len(default_list))
+            if 0 <= arg_idx_in_defaults < len(default_list):
+                default_list.pop(arg_idx_in_defaults)
+            setattr(node.args, defaults_name, default_list)
+
         new_arguments = []
         for arg_idx, argument in enumerate(arguments):
             # NOTE: All these are used to remove 'Annotated[x, ...]' arguments, since they're likely
@@ -185,13 +232,21 @@ def _clear_fastapi_dependencies_from_args(node: ast.AsyncFunctionDef) -> ast.Asy
             elif not isinstance(argument.annotation.slice, ast.Tuple):
                 pass
             else:
-                if defaults_name is not None:
-                    default_list: list = getattr(node.args, defaults_name)
-                    arg_idx_in_defaults = arg_idx - (len(arguments) - len(default_list))
-                    if 0 <= arg_idx_in_defaults < len(default_list):
-                        default_list.pop(arg_idx_in_defaults)
-                    setattr(node.args, defaults_name, default_list)
-                continue
+                match argument.annotation.slice.elts:
+                    # If it's a non-deprecated Body-annotated argument, keep it.
+                    case [real_type_annotation, ast.Call(func=ast.Name(id="Body"), keywords=keywords)]:
+
+                        def _is_deprecated(k: ast.keyword) -> bool:
+                            return k.arg == "deprecated" and isinstance(k.value, ast.Constant) and bool(k.value.value)
+
+                        if not any(_is_deprecated(_k) for _k in keywords):
+                            argument.annotation = real_type_annotation
+                        else:
+                            _remove_argument(arg_idx)
+                            continue
+                    case _:
+                        _remove_argument(arg_idx)
+                        continue
 
             new_arguments.append(argument)
 

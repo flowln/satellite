@@ -1199,7 +1199,7 @@ class QueueManager:
     async def run_engine_runs(
         self,
         option: Literal["active", "open", "closed"] = "active",
-        option_from_body: Annotated[str, Body(alias="option", embed=True)] = "",
+        option_from_body: Annotated[str, Body(alias="option", embed=True, deprecated=True)] = "",
     ) -> RunEngineRunsResponse:
         """
         Retrieve the list of runs in the current plan execution.
@@ -1261,7 +1261,7 @@ class QueueManager:
     async def get_console_output_from_uid(
         self,
         last_msg_uid: UUID | None = None,
-        last_msg_uid_from_body: Annotated[str, Body(alias="last_msg_uid", embed=True)] = "",
+        last_msg_uid_from_body: Annotated[str, Body(alias="last_msg_uid", embed=True, deprecated=True)] = "",
         lines: int = 200,
     ) -> LatestConsoleResponse:
         """

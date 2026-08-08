@@ -1,3 +1,4 @@
+import logging
 import time as ttime
 from typing import cast
 
@@ -6,9 +7,17 @@ import pytest
 import yaml
 
 from satellite.client.client import OAuthAuthentication, SyncClient
-from satellite.models import ManagerStatus
+from satellite.models import ManagerStatus, QueueItem
 from satellite.server.configuration import ManagerConfiguration, _ManagerAuthenticationProvider
 from satellite.server.security.access_policies import BasicAPIAccessPolicy
+
+
+@pytest.fixture(autouse=True, scope="session")
+def configure_client_logging():
+    logger = logging.getLogger("satellite.client")
+    logger.setLevel(logging.DEBUG)
+
+    yield
 
 
 @pytest.fixture
@@ -69,6 +78,43 @@ def test_environment_open_close_with_wait_condition(python_client: SyncClient):
     python_client.wait_for_idle(timeout=5)
     status = python_client.status()
     assert status.manager_state == "idle"
+
+    response = python_client.environment_close()
+    assert response.success, response.msg
+
+    python_client.wait_for_idle(timeout=5)
+    status = python_client.status()
+    assert status.manager_state == "idle"
+
+
+async def test_queue_item_add_and_run(python_client: SyncClient):
+    response = python_client.environment_open()
+    assert response.success, response.msg
+
+    python_client.wait_for_idle(timeout=5)
+    status = python_client.status()
+    assert status.manager_state == "idle"
+
+    try:
+        item = QueueItem(name="simple_plan", args=["rand"])
+        response = python_client.queue_item_add(item)
+        assert response.success, response.msg
+
+        response = python_client.queue_start()
+        assert response.success, response.msg
+
+        python_client.wait_for_condition(lambda s: s.worker_environment_state == "running")
+        python_client.wait_for_idle()
+
+        history = python_client.history_get()
+        assert len(history.items) == 1
+        assert history.items[0].name == "simple_plan"
+    finally:
+        response = python_client.queue_clear()
+        assert response.success, response.msg
+
+        response = python_client.history_clear()
+        assert response.success, response.msg
 
     response = python_client.environment_close()
     assert response.success, response.msg

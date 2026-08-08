@@ -37,6 +37,21 @@ async def test_queue_add_simple(client: httpx.AsyncClient):
     assert returned_item.uid is not None
 
 
+async def test_queue_add_remove_in_batch(client: httpx.AsyncClient):
+    async with open_environment(client):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"items": [item.model_dump(mode="json")] * 5}
+
+        response = assert_response(await client.post("/queue/queue/item/add/batch", json=request_body))
+        assert response.json()["qsize"] == 5
+
+        items = response.json()["items"]
+        uids = [items[1]["item_uid"], items[3]["item_uid"]]
+
+        response = assert_response(await client.post("/queue/queue/item/remove/batch", json={"uids": uids}))
+        assert response.json()["qsize"] == 3
+
+
 async def test_queue_add_count(client: httpx.AsyncClient):
     async with open_environment(client):
         item = QueueItem(name="count", args=[["rand"]], kwargs={"num": 10})

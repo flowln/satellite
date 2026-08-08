@@ -124,6 +124,49 @@ async def test_queue_item_add_and_run(python_client: SyncClient):
     assert status.manager_state == "idle"
 
 
+def test_queue_add_remove_batch(python_client: SyncClient):
+    response = python_client.environment_open()
+    assert response.success, response.msg
+
+    python_client.wait_for_idle(timeout=5)
+    status = python_client.status()
+    assert status.manager_state == "idle"
+
+    try:
+        item = QueueItem(name="simple_plan", args=["rand"])
+
+        response = python_client.queue_item_add_batch([item] * 5)
+        assert response.success, response.msg
+        assert response.queue_size == 5
+        assert response.items is not None and len(response.items) == 5
+
+        items = response.items
+        assert items[1].uid is not None
+        assert items[3].uid is not None
+
+        uids = [items[1].uid, items[3].uid]
+
+        response = python_client.queue_item_remove_batch(uids)
+        assert response.success, response.msg
+        assert response.queue_size == 3
+        assert response.items is not None and len(response.items) == 2
+
+        assert [_i.uid for _i in response.items] == uids
+    finally:
+        response = python_client.queue_clear()
+        assert response.success, response.msg
+
+        response = python_client.history_clear()
+        assert response.success, response.msg
+
+    response = python_client.environment_close()
+    assert response.success, response.msg
+
+    python_client.wait_for_idle(timeout=5)
+    status = python_client.status()
+    assert status.manager_state == "idle"
+
+
 @pytest.fixture
 def python_client_with_auth(monkeypatch, tmp_path):
     configuration = ManagerConfiguration()

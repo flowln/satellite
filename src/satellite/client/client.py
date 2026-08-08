@@ -1,9 +1,9 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 import json
 import logging
 import time as ttime
-from typing import cast
+from typing import Any, Literal, cast
 
 import httpx
 import pydantic
@@ -57,6 +57,15 @@ class OAuthAuthentication(httpx.Auth):
         self.refresh_token = refresh_token
 
 
+def _serialize_value(value: Any) -> tuple[Literal["query", "body"], str | list | dict]:
+    if isinstance(value, pydantic.BaseModel):
+        return "body", value.model_dump(mode="json")
+    elif isinstance(value, Sequence):
+        return "body", [_serialize_value(_v)[1] for _v in value]
+    else:
+        return "query", str(value)
+
+
 class AsyncClient(BaseAsyncClient):
     """Python client for communication with the satellite server via asynchronous httpx requests."""
 
@@ -83,10 +92,19 @@ class AsyncClient(BaseAsyncClient):
         body_parameters = {}
 
         for parameter_name, parameter_value in kwargs.items():
-            if isinstance(parameter_value, pydantic.BaseModel):
-                body_parameters[parameter_name] = parameter_value.model_dump(mode="json")
-            else:
-                query_parameters[parameter_name] = parameter_value
+            match _serialize_value(parameter_value):
+                case "query", value if isinstance(value, (str, list)):
+                    query_parameters[parameter_name] = value
+                case "body", value:
+                    body_parameters[parameter_name] = value
+                case where, value:
+                    logger.error(
+                        "Failed to properly serialize value for POST request:"
+                        "Argument '%s' should go to '%s' with value '%s'.",
+                        parameter_name,
+                        where,
+                        value,
+                    )
 
         logger.debug("Sending POST request to '%s' with the following data:", endpoint)
         logger.debug("  Query parameters: %s", " ".join(f"{_k}={_v}" for _k, _v in query_parameters.items()))

@@ -47,6 +47,7 @@ from satellite.models import (
     LatestConsoleResponse,
     ManagerStatus,
     QueueAddRemoveResponse,
+    QueueAddRemoveBatchResponse,
     QueueItem,
     QueueResponse,
     RunEngineRunsResponse,

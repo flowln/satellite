@@ -9,7 +9,7 @@ import time
 from typing import Annotated, Any, Literal, cast, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter, Body, Security
+from fastapi import APIRouter, Body, Query, Security
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -31,6 +31,7 @@ from ..models import (
     HistoryResponse,
     LatestConsoleResponse,
     ManagerStatus,
+    QueueAddRemoveBatchResponse,
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
@@ -711,6 +712,39 @@ class QueueManager:
 
         return ret
 
+    async def _validate_queue_item[T: GenericResponse](self, ret: T, item: QueueItem, *, user_group: str) -> T:
+        if item.type == "plan":
+            group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+            if user_group in group_permissions and not group_permissions[user_group].is_plan_allowed(item.name):
+                ret.success = False
+                ret.msg = (
+                    "Failed to add item to queue:"
+                    f"The current user (group: '{user_group}') doesn't have access to plan '{item.name}'."
+                )
+                return ret
+
+            annotation = await self._retrieve_annotation_for_plan(item)
+
+            if annotation is None:
+                ret.success = False
+                ret.msg = f"Failed to add item to queue: The specified plan '{item.name}' doesn't exist."
+                return ret
+
+            device_annotations = await self._retrieve_device_annotations()
+            try:
+                validate_plan(
+                    annotation,
+                    item.args,
+                    item.kwargs,
+                    device_annotations=device_annotations,
+                )
+            except ValidationError as exc:
+                ret.success = False
+                ret.msg = f"Failed to add item to queue: Validation failed - {str(exc)}"
+                return ret
+
+        return ret
+
     @post_endpoint("/queue/item/add")
     async def queue_item_add(
         self,
@@ -721,6 +755,8 @@ class QueueManager:
         user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
         user_group: Annotated[str, Security(get_current_user_group)] = "primary",
         lock_key: str | None = None,
+        *,
+        ignore_validation: Annotated[bool, Query(include_in_schema=False)] = False,
     ) -> QueueAddRemoveResponse:
         """
         Add a new item to the queue.
@@ -765,35 +801,9 @@ class QueueManager:
         if lock_key is not None:
             ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
-        # Validate item
-        if item.type == "plan":
-            group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
-            if user_group in group_permissions and not group_permissions[user_group].is_plan_allowed(item.name):
-                ret.success = False
-                ret.msg = (
-                    "Failed to add item to queue:"
-                    f"The current user (group: '{user_group}') doesn't have access to plan '{item.name}'."
-                )
-                return ret
-
-            annotation = await self._retrieve_annotation_for_plan(item)
-
-            if annotation is None:
-                ret.success = False
-                ret.msg = f"Failed to add item to queue: The specified plan '{item.name}' doesn't exist."
-                return ret
-
-            device_annotations = await self._retrieve_device_annotations()
-            try:
-                validate_plan(
-                    annotation,
-                    item.args,
-                    item.kwargs,
-                    device_annotations=device_annotations,
-                )
-            except ValidationError as exc:
-                ret.success = False
-                ret.msg = f"Failed to add item to queue: Validation failed - {str(exc)}"
+        if not ignore_validation:
+            ret = await self._validate_queue_item(ret, item, user_group=user_group)
+            if not ret.success:
                 return ret
 
         # Populate information
@@ -843,6 +853,93 @@ class QueueManager:
         ret.item = item
 
         await self.check_environment_process(force_update_status=True)
+
+        return ret
+
+    @post_endpoint("/queue/item/add/batch")
+    async def queue_item_add_in_batch(
+        self,
+        items: Annotated[list[QueueItem], Body(embed=True)],
+        pos: int | Literal["front", "back"] = "back",
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        items : sequence of QueueItem
+            The items to add to the queue.
+
+            The 'item_uid' field is expected to be null, as it will be filled up after this call.
+        pos : int, "back" or "front", optional
+            The position in which to add this item in the queue.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveBatchResponse()
+
+        for item in items:
+            item_return = GenericResponse()
+            item_return = await self._validate_queue_item(item_return, item, user_group=user_group)
+
+            if not item_return.success:
+                ret.success = item_return.success
+                ret.msg = item_return.msg
+
+                return ret
+
+        new_items = []
+        for item in items:
+            item_return = await self.queue_item_add(
+                item=item,
+                pos=pos,
+                before_uid=before_uid,
+                after_uid=after_uid,
+                user=user,
+                user_group=user_group,
+                lock_key=lock_key,
+                ignore_validation=True,
+            )
+
+            if not item_return.success:
+                ret.success = item_return.success
+                ret.msg = item_return.msg
+
+                return ret
+
+            new_items.append(item_return.item)
+
+        ret.queue_size = self._status.items_in_queue
+        ret.items = new_items
 
         return ret
 
@@ -919,6 +1016,42 @@ class QueueManager:
 
         await self.check_environment_process(force_update_status=True)
 
+        return ret
+
+    @post_endpoint("/queue/item/remove/batch", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    async def queue_item_remove_in_batch(
+        self, uids: Annotated[list[UUID], Body(embed=True)], ignore_missing: bool = True, lock_key: str | None = None
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Remove multiple items from the queue.
+
+        Parameters
+        ----------
+        uids : sequence of UUIDs
+            Remove all items with the given UUIDs.
+        ignore_missing : bool, optional
+            If True (default), remove all items matching the given UUIDs, and ignore
+            any missing items. Otherwise, any missing items will fail the operation,
+            and the method will return the items that have been removed.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveBatchResponse()
+        ret.items = []
+
+        for uid in uids:
+            item_return = await self.queue_item_remove(uid=str(uid), lock_key=lock_key)
+
+            if not item_return.success and not ignore_missing:
+                ret.success = item_return.success
+                ret.msg = item_return.msg
+
+                return ret
+
+            if item_return.success:
+                ret.items.append(item_return.item)
+
+        ret.queue_size = self._status.items_in_queue
         return ret
 
     @post_endpoint("/queue/start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])

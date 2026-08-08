@@ -51,7 +51,7 @@ async def open_environment(client: httpx.AsyncClient, *, clear: bool = True):
 
 
 def assert_response(response: httpx.Response) -> httpx.Response:
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
 
     response_body = response.json()
     assert response_body["success"], response_body["msg"]

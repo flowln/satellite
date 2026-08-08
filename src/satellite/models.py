@@ -243,6 +243,16 @@ class QueueAddRemoveResponse(GenericResponse):
     """The inserted / removed item, with the 'uid' attribute filled in. If 'success' = False, None is returned."""
 
 
+class QueueAddRemoveBatchResponse(GenericResponse):
+    """Data returned by the '/queue/item/add/batch' and '/queue/item/remove/batch' operations."""
+
+    queue_size: int | None = Field(alias="qsize", default=None)
+    """Total number of items in the queue after the operation. If 'success' = False, None is returned instead."""
+
+    items: Sequence[QueueItem] | None = None
+    """The inserted / removed items, with the 'uid' attribute filled in. If 'success' = False, None is returned."""
+
+
 class RunEngineRunsResponse(GenericResponse):
     """Data returned by the 're/runs' API endpoint."""
 

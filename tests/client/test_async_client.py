@@ -163,6 +163,48 @@ class TestWithSingleEnvironment:
 
         assert [_i.uid for _i in response.items] == uids
 
+    async def test_queue_item_update(self, python_client: AsyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+
+        response = await python_client.queue_item_add_batch([item] * 5)
+        assert response.success, response.msg
+        assert response.queue_size == 5
+        assert response.items is not None and len(response.items) == 5
+
+        second_item = response.items[1]
+        second_item.name = "count"
+        second_item.args = [["rand"]]
+        second_item.kwargs = {"num": 10}
+
+        response = await python_client.queue_item_update(second_item)
+        assert response.success, response.msg
+        assert response.queue_size == 5
+
+        new_second_item = response.item
+        assert new_second_item.uid == second_item.uid
+        assert new_second_item.name == second_item.name
+        assert new_second_item.args == second_item.args
+        assert new_second_item.kwargs == second_item.kwargs
+
+        response = await python_client.queue_get()
+        assert not all(_i.name == "simple_plan" for _i in response.items)
+
+        new_item = QueueItem(name="simple_plan", args=["rand"])
+        new_item.uid = new_second_item.uid
+
+        response = await python_client.queue_item_update(new_item, replace=True)
+        assert response.success, response.msg
+        assert response.queue_size == 5
+
+        new_second_item = response.item
+        assert new_second_item.uid != second_item.uid
+        assert new_second_item.name == new_item.name
+        assert new_second_item.args == new_item.args
+        assert new_second_item.kwargs == new_item.kwargs
+
+        response = await python_client.queue_get()
+        assert all(_i.name == "simple_plan" for _i in response.items)
+
     async def test_queue_item_move(self, python_client: AsyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
         response = await python_client.queue_item_add_batch([item] * 3)

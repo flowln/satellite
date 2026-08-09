@@ -1095,6 +1095,72 @@ class QueueManager:
         ret.queue_size = self._status.items_in_queue
         return ret
 
+    @post_endpoint("/queue/item/update")
+    async def queue_item_update(
+        self,
+        item: Annotated[QueueItem, Body(embed=True)],
+        replace: bool = False,
+        user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        item : QueueItem
+            A queue item with updated information to commit to the queue.
+
+            The 'item_uid' field is expected to be filled, as the item to be updated is determined from it.
+        replace : bool, optional
+            Whether to replace the existing item. The practial consequence of using this option is that a new uid
+            is generated for the item, instead of keeping the uid of the replaced item. False by default.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        if item.uid is None:
+            ret.success = False
+            ret.msg = "Failed to update item: The provided item has no uid."
+            return ret
+
+        ret = await self._validate_queue_item(ret, item, user_group=user_group)
+        if not ret.success:
+            return ret
+
+        try:
+            position_in_queue = await self._get_queue_position(uid=item.uid)
+        except RuntimeError:
+            ret.success = False
+            ret.msg = "Failed to update item: No item with such uid exists on the queue."
+            return ret
+
+        item.last_modification_user = user
+        item.last_modification_user_group = user_group
+
+        if replace:
+            item.uid = create_uuid()
+
+        await self._persistence_backend.queue_pop_item(position_in_queue)
+        ret.queue_size = await self._persistence_backend.queue_insert_item(item, position_in_queue)
+
+        ret.item = item
+
+        return ret
+
     @post_endpoint("/queue/item/move", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_item_move(
         self,

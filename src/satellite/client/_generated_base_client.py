@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-09T17:01+00:00
-Git revision: e9d8aeb79c8f831dc04121bc97059753763fc08e
+Date: 2026-08-09T18:33+00:00
+Git revision: 13d5651324970ed809517678684263424fdb7ef4
 """
 
 from abc import abstractmethod
@@ -420,6 +420,45 @@ class BaseAsyncClient(httpx.AsyncClient):
         response = await self.post_implementation("/queue/item/remove/batch", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_update(
+        self, item: QueueItem, replace: bool = False, lock_key: str | None = None
+    ) -> QueueAddRemoveResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        item : QueueItem
+            A queue item with updated information to commit to the queue.
+
+            The 'item_uid' field is expected to be filled, as the item to be updated is determined from it.
+        replace : bool, optional
+            Whether to replace the existing item. The practial consequence of using this option is that a new uid
+            is generated for the item, instead of keeping the uid of the replaced item. False by default.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"replace": False, "lock_key": None}
+        original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/update", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
     async def queue_item_move(
@@ -1242,6 +1281,45 @@ class BaseSyncClient:
         response = self.post_implementation("/queue/item/remove/batch", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_update(
+        self, item: QueueItem, replace: bool = False, lock_key: str | None = None
+    ) -> QueueAddRemoveResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        item : QueueItem
+            A queue item with updated information to commit to the queue.
+
+            The 'item_uid' field is expected to be filled, as the item to be updated is determined from it.
+        replace : bool, optional
+            Whether to replace the existing item. The practial consequence of using this option is that a new uid
+            is generated for the item, instead of keeping the uid of the replaced item. False by default.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"replace": False, "lock_key": None}
+        original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/update", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
     def queue_item_move(

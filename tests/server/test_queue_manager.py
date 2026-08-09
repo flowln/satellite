@@ -1,4 +1,5 @@
 import asyncio
+from uuid import UUID
 
 from fakeredis import FakeServer
 import httpx
@@ -67,6 +68,47 @@ class TestWithSingleEnvironment:
 
         response = assert_response(await client.post("/queue/queue/item/remove/batch", json={"uids": uids}))
         assert response.json()["qsize"] == 3
+
+    async def test_queue_update_item(self, client: httpx.AsyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"items": [item.model_dump(mode="json")] * 5}
+
+        response = assert_response(await client.post("/queue/queue/item/add/batch", json=request_body))
+        assert response.json()["qsize"] == 5
+
+        second_item = response.json()["items"][1]
+        second_item["name"] = "count"
+        second_item["args"] = [["rand"]]
+        second_item["kwargs"] = {"num": 10}
+
+        request_body = {"item": second_item}
+        response = assert_response(await client.post("/queue/item/update", json=request_body))
+        assert response.json()["qsize"] == 5
+
+        new_second_item = response.json()["item"]
+        assert new_second_item["item_uid"] == second_item["item_uid"]
+        assert new_second_item["name"] == second_item["name"]
+        assert new_second_item["args"] == second_item["args"]
+        assert new_second_item["kwargs"] == second_item["kwargs"]
+
+        response = assert_response(await client.get("/queue/get"))
+        assert not all(_i["name"] == "simple_plan" for _i in response.json()["items"])
+
+        new_item = QueueItem(name="simple_plan", args=["rand"])
+        new_item.uid = UUID(new_second_item["item_uid"])
+
+        request_body = {"item": new_item.model_dump(mode="json")}
+        response = assert_response(await client.post("/queue/item/update?replace=true", json=request_body))
+        assert response.json()["qsize"] == 5
+
+        new_second_item = response.json()["item"]
+        assert new_second_item["item_uid"] != second_item["item_uid"]
+        assert new_second_item["name"] == new_item.name
+        assert new_second_item["args"] == new_item.args
+        assert new_second_item["kwargs"] == new_item.kwargs
+
+        response = assert_response(await client.get("/queue/get"))
+        assert all(_i["name"] == "simple_plan" for _i in response.json()["items"])
 
     async def test_queue_move_item(self, client: httpx.AsyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])

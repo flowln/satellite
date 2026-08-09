@@ -73,7 +73,8 @@ async def test_queue(backend: PersistenceBackend, sample_items: tuple[QueueItem,
         backend.queue_get(limit=0),
     )
 
-    await backend.queue_insert_item(sample_items[0])
+    ret = await backend.queue_insert_item(sample_items[0])
+    assert ret == 1
 
     # Check: queue_insert_item worked
     current = await backend.queue_get()
@@ -81,7 +82,8 @@ async def test_queue(backend: PersistenceBackend, sample_items: tuple[QueueItem,
     assert len(current) == 1
     assert current[0].uid == sample_items[0].uid
 
-    await backend.queue_insert_item(sample_items[1])
+    ret = await backend.queue_insert_item(sample_items[1])
+    assert ret == 2
 
     # Check: queue_get, queue_insert_item inserted at the correct place
     current = await backend.queue_get()
@@ -108,7 +110,8 @@ async def test_queue(backend: PersistenceBackend, sample_items: tuple[QueueItem,
     current_length = await backend.queue_length()
     assert current_length == 1
 
-    await backend.queue_insert_item(sample_items[1], index=None)
+    ret = await backend.queue_insert_item(sample_items[1], index=None)
+    assert ret == 2
 
     # Check: queue_get, queue_insert_item inserted at the correct place with the index parameter
     current = await backend.queue_get()
@@ -140,7 +143,8 @@ async def test_history(
         backend.history_get(limit=0),
     )
 
-    await backend.history_insert_item(sample_history_items[0])
+    ret = await backend.history_insert_item(sample_history_items[0])
+    assert ret == 1
 
     # Check: history_insert_item worked
     current = await backend.history_get()
@@ -148,7 +152,8 @@ async def test_history(
     assert len(current) == 1
     assert current[0].uid == sample_history_items[0].uid
 
-    await backend.history_insert_item(sample_history_items[1])
+    ret = await backend.history_insert_item(sample_history_items[1])
+    assert ret == 2
 
     # Check: history_get, history_insert_item inserted at the correct place
     current = await backend.history_get()
@@ -175,7 +180,8 @@ async def test_history(
     current_length = await backend.history_length()
     assert current_length == 1
 
-    await backend.history_insert_item(sample_history_items[1], index=None)
+    ret = await backend.history_insert_item(sample_history_items[1], index=None)
+    assert ret == 2
 
     # Check: history_get, history_insert_item inserted at the correct place with the index parameter
     current = await backend.history_get()

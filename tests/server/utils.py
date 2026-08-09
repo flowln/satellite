@@ -19,21 +19,22 @@ async def wait_status_change(client: httpx.AsyncClient, coro: Coroutine, *, time
         raise
 
 
+async def wait_for_idle(client: httpx.AsyncClient, should_environment_be_alive: bool = False):
+    ready = False
+    while not ready:
+        _status = (await client.get("/queue/status")).json()
+        model = ManagerStatus.model_validate(_status)
+        ready = model.manager_state == "idle"
+
+        if should_environment_be_alive:
+            ready &= model.worker_environment_exists
+
+        await asyncio.sleep(0.01)
+
+
 @asynccontextmanager
 async def open_environment(client: httpx.AsyncClient, *, clear: bool = True):
-    async def _wait_for_idle(should_environment_be_alive: bool = False):
-        ready = False
-        while not ready:
-            _status = (await client.get("/queue/status")).json()
-            model = ManagerStatus.model_validate(_status)
-            ready = model.manager_state == "idle"
-
-            if should_environment_be_alive:
-                ready &= model.worker_environment_exists
-
-            await asyncio.sleep(0.01)
-
-    await wait_status_change(client, _wait_for_idle())
+    await wait_status_change(client, wait_for_idle(client))
 
     if clear:
         (await client.post("/queue/queue/clear")).raise_for_status()
@@ -41,13 +42,13 @@ async def open_environment(client: httpx.AsyncClient, *, clear: bool = True):
 
     (await client.post("/queue/environment/open")).raise_for_status()
 
-    await wait_status_change(client, _wait_for_idle(should_environment_be_alive=True))
+    await wait_status_change(client, wait_for_idle(client, should_environment_be_alive=True))
 
     yield
 
     (await client.post("/queue/environment/close")).raise_for_status()
 
-    await wait_status_change(client, _wait_for_idle())
+    await wait_status_change(client, wait_for_idle(client))
 
 
 def assert_response(response: httpx.Response) -> httpx.Response:

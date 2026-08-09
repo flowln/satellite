@@ -1,4 +1,5 @@
 import logging
+import os
 import time as ttime
 from typing import cast
 
@@ -87,15 +88,57 @@ def test_environment_open_close_with_wait_condition(python_client: SyncClient):
     assert status.manager_state == "idle"
 
 
-async def test_queue_item_add_and_run(python_client: SyncClient):
-    response = python_client.environment_open()
-    assert response.success, response.msg
+class TestWithSingleEnvironment:
+    @pytest.fixture(scope="class")
+    @classmethod
+    def python_client(cls, data_path):
+        config_path = str(data_path / "startup" / "config.yaml")
 
-    python_client.wait_for_idle(timeout=5)
-    status = python_client.status()
-    assert status.manager_state == "idle"
+        old_config_path = os.environ.get("QSERVER_CONFIG")
+        os.environ["QSERVER_CONFIG"] = config_path
 
-    try:
+        from satellite.server.main import _create_app
+
+        app = _create_app()
+
+        _client = SyncClient("http://test", transport=httpx.ASGITransport(app=app))
+        yield _client
+
+        if old_config_path is None:
+            del os.environ["QSERVER_CONFIG"]
+        else:
+            os.environ["QSERVER_CONFIG"] = old_config_path
+
+    @pytest.fixture(autouse=True, scope="class")
+    @classmethod
+    def with_environment_open(cls, python_client: SyncClient):
+        python_client.wait_for_idle(timeout=5)
+        status = python_client.status()
+        assert status.manager_state == "idle"
+
+        response = python_client.environment_open()
+        assert response.success, response.msg
+
+        python_client.wait_for_idle(timeout=5)
+        status = python_client.status()
+        assert status.manager_state == "idle"
+
+        yield
+
+        response = python_client.environment_close()
+        assert response.success, response.msg
+
+    @pytest.fixture(autouse=True, scope="function")
+    def with_queue_and_history_clean(self, python_client: SyncClient):
+        response = python_client.queue_clear()
+        assert response.success, response.msg
+
+        response = python_client.history_clear()
+        assert response.success, response.msg
+
+        yield
+
+    def test_queue_item_add_and_run(self, python_client: SyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
         response = python_client.queue_item_add(item)
         assert response.success, response.msg
@@ -109,30 +152,8 @@ async def test_queue_item_add_and_run(python_client: SyncClient):
         history = python_client.history_get()
         assert len(history.items) == 1
         assert history.items[0].name == "simple_plan"
-    finally:
-        response = python_client.queue_clear()
-        assert response.success, response.msg
 
-        response = python_client.history_clear()
-        assert response.success, response.msg
-
-    response = python_client.environment_close()
-    assert response.success, response.msg
-
-    python_client.wait_for_idle(timeout=5)
-    status = python_client.status()
-    assert status.manager_state == "idle"
-
-
-def test_queue_add_remove_batch(python_client: SyncClient):
-    response = python_client.environment_open()
-    assert response.success, response.msg
-
-    python_client.wait_for_idle(timeout=5)
-    status = python_client.status()
-    assert status.manager_state == "idle"
-
-    try:
+    def test_queue_add_remove_batch(self, python_client: SyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
 
         response = python_client.queue_item_add_batch([item] * 5)
@@ -152,30 +173,8 @@ def test_queue_add_remove_batch(python_client: SyncClient):
         assert response.items is not None and len(response.items) == 2
 
         assert [_i.uid for _i in response.items] == uids
-    finally:
-        response = python_client.queue_clear()
-        assert response.success, response.msg
 
-        response = python_client.history_clear()
-        assert response.success, response.msg
-
-    response = python_client.environment_close()
-    assert response.success, response.msg
-
-    python_client.wait_for_idle(timeout=5)
-    status = python_client.status()
-    assert status.manager_state == "idle"
-
-
-def test_queue_item_move(python_client: SyncClient):
-    response = python_client.environment_open()
-    assert response.success, response.msg
-
-    python_client.wait_for_idle(timeout=5)
-    status = python_client.status()
-    assert status.manager_state == "idle"
-
-    try:
+    def test_queue_item_move(self, python_client: SyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
         response = python_client.queue_item_add_batch([item] * 3)
         assert response.success, response.msg
@@ -225,19 +224,6 @@ def test_queue_item_move(python_client: SyncClient):
         new_item_uids = [_i.uid for _i in response.items]
 
         assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
-    finally:
-        response = python_client.queue_clear()
-        assert response.success, response.msg
-
-        response = python_client.history_clear()
-        assert response.success, response.msg
-
-    response = python_client.environment_close()
-    assert response.success, response.msg
-
-    python_client.wait_for_idle(timeout=5)
-    status = python_client.status()
-    assert status.manager_state == "idle"
 
 
 @pytest.fixture

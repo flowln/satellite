@@ -87,7 +87,7 @@ def sample_history_items(sample_items) -> tuple[HistoryItem, HistoryItem]:
     return (_r_item, _m_item)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def data_path() -> Path:
     return Path(__file__).parent / "testdata"
 
@@ -115,13 +115,15 @@ def ensure_environment_packages_are_cached():
     subprocess.run(["pip", "install", "ophyd", "matplotlib"])
 
 
-@pytest.fixture
-def default_configuration_setup(monkeypatch, data_path):
-    if os.getenv("QSERVER_CONFIG") is not None:
-        return
-
+@pytest.fixture(scope="class")
+def default_configuration_setup(data_path):
     config_path = str(data_path / "startup" / "config.yaml")
-    monkeypatch.setenv("QSERVER_CONFIG", config_path)
+    os.environ["QSERVER_CONFIG"] = config_path
+
+    try:
+        yield
+    finally:
+        del os.environ["QSERVER_CONFIG"]
 
 
 @pytest.fixture
@@ -143,6 +145,6 @@ def pytest_addoption(parser):
 
 def pytest_generate_tests(metafunc: pytest.Metafunc):
     if "client" in metafunc.fixturenames:
-        scope = "session" if metafunc.config.getoption("session") else "function"
+        scope = "session" if metafunc.config.getoption("session") else "class"
 
         metafunc.parametrize("client", (client,), indirect=True, scope=scope, ids=(scope,))

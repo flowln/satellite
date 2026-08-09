@@ -6,19 +6,7 @@ import pytest
 
 from satellite.models import HistoryItem, HistoryResponse, ManagerStatus, QueueItem
 
-from .utils import assert_response, open_environment, wait_status_change
-
-
-async def wait_for_idle(client: httpx.AsyncClient):
-    async def _wait_for_idle():
-        ready = False
-        while not ready:
-            _status = (await client.get("/queue/status")).json()
-            ready = ManagerStatus.model_validate(_status).manager_state == "idle"
-
-            await asyncio.sleep(0.01)
-
-    await wait_status_change(client, _wait_for_idle())
+from .utils import assert_response, open_environment, wait_for_idle, wait_status_change
 
 
 async def wait_for_queue_start(client: httpx.AsyncClient, old_queue_uid: UUID, old_queue_size: int):
@@ -101,20 +89,27 @@ async def wait_until_item_ran(client: httpx.AsyncClient, old_history_uid: UUID, 
 
 
 class TestPlanExecution:
-    @pytest.fixture(autouse=True)
-    async def with_environment_open(self, client: httpx.AsyncClient):
+    @pytest.fixture(scope="class")
+    @classmethod
+    def client(cls, default_configuration_setup) -> httpx.AsyncClient:
+        from satellite.server.main import _create_app
+
+        app = _create_app()
+
+        return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+    @pytest.fixture(autouse=True, scope="class")
+    @classmethod
+    async def with_open_environment(cls, client: httpx.AsyncClient):
+        async with open_environment(client):
+            yield
+
+    @pytest.fixture(autouse=True, scope="function")
+    async def start_from_clean_state(self, client: httpx.AsyncClient):
+        await wait_status_change(client, wait_for_idle(client))
+
         (await client.post("/queue/queue/clear")).raise_for_status()
         (await client.post("/queue/history/clear")).raise_for_status()
-
-        (await client.post("/queue/environment/open")).raise_for_status()
-
-        await wait_for_idle(client)
-
-        yield
-
-        (await client.post("/queue/environment/close")).raise_for_status()
-
-        await wait_for_idle(client)
 
     async def test_failing_plan(self, client: httpx.AsyncClient):
         item = QueueItem(name="failing_plan")
@@ -195,9 +190,10 @@ class TestPlanExecution:
 
         await wait_for_idle(client)
 
+        # Keep an open environment for the next tests
+        await client.post("/queue/environment/open")
 
-async def test_queue_run_instruction(client: httpx.AsyncClient):
-    async with open_environment(client):
+    async def test_queue_run_instruction(self, client: httpx.AsyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = {"item": item.model_dump(mode="json")}
         for _ in range(3):

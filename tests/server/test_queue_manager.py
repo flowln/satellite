@@ -90,6 +90,18 @@ class TestWithSingleEnvironment:
         item_uids = new_item_uids
 
         response = assert_response(
+            await client.post("/queue/queue/item/move", params={"uid": item_uids[0], "after_uid": item_uids[1]})
+        )
+        assert response.json()["item"]["item_uid"] == item_uids[0]
+
+        response = assert_response(await client.get("/queue/queue/get"))
+        new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+        assert new_item_uids == [item_uids[1], item_uids[0], item_uids[2]]
+
+        item_uids = new_item_uids
+
+        response = assert_response(
             await client.post("/queue/queue/item/move", params={"uid": item_uids[1], "pos_dest": 0})
         )
         assert response.json()["item"]["item_uid"] == item_uids[1]

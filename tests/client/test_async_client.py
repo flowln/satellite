@@ -186,6 +186,21 @@ class TestWithSingleEnvironment:
 
         item_uids = new_item_uids
 
+        # Move first to second
+        response = await python_client.queue_item_move(pos=0, after_uid=str(item_uids[1]))
+        assert response.success, response.msg
+
+        assert response.item is not None and response.item.uid == item_uids[0]
+
+        response = await python_client.queue_get()
+        assert response.success, response.msg
+
+        new_item_uids = [_i.uid for _i in response.items]
+
+        assert new_item_uids == [item_uids[1], item_uids[0], item_uids[2]]
+
+        item_uids = new_item_uids
+
         # Move item in the middle to first
         response = await python_client.queue_item_move(uid=item_uids[1], pos_dest=0)
         assert response.success, response.msg

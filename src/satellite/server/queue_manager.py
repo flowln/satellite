@@ -778,15 +778,22 @@ class QueueManager:
         set_position_parameters = [_p for _p in {"pos", "before_uid", "after_uid"} if locals()[_p] is not None]
         if len(set_position_parameters) != 1:
             ret.success = False
-            ret.msg = "Failed to add item to queue: Exactly one of 'pos', 'before_uid' or 'after_uid' must be set."
+            ret.msg = (
+                "Failed to add item to queue:"
+                " Exactly one of 'pos', 'before_uid' or 'after_uid' must be set"
+                f" (instead of {set_position_parameters})."
+            )
             return ret, None
 
         try:
             uid = before_uid or after_uid
             index = await self._get_queue_position(position=pos, uid=uid)
 
-            if after_uid is not None and isinstance(index, int) and index == self._status.items_in_queue:
-                index = None
+            if after_uid is not None and isinstance(index, int):
+                if index == self._status.items_in_queue - 1:
+                    index = None
+                else:
+                    index += 1
         except Exception:
             ret.success = False
             ret.msg = f"Failed to add item to queue: No item with uid '{uid}' could be found."
@@ -1159,6 +1166,8 @@ class QueueManager:
             return ret
 
         item = await self._persistence_backend.queue_pop_item(original_index)
+        if destination_index is not None and original_index is not None and original_index < destination_index:
+            destination_index -= 1
         await self._persistence_backend.queue_insert_item(item, destination_index)
 
         ret.queue_size = self._status.items_in_queue

@@ -123,6 +123,59 @@ class TestWithSingleEnvironment:
 
         assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
 
+    async def test_queue_move_items_in_batch(self, client: httpx.AsyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"items": [item.model_dump(mode="json")] * 5}
+
+        response = assert_response(await client.post("/queue/queue/item/add/batch", json=request_body))
+        assert response.json()["qsize"] == 5
+
+        item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+        response = assert_response(
+            await client.post(
+                "/queue/queue/item/move/batch",
+                params={"after_uid": item_uids[2]},
+                json={"uids": [item_uids[0], item_uids[1]]},
+            )
+        )
+        assert [_i["item_uid"] for _i in response.json()["items"]] == [item_uids[0], item_uids[1]]
+
+        response = assert_response(await client.get("/queue/queue/get"))
+        new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+        assert new_item_uids == [item_uids[2], item_uids[0], item_uids[1], item_uids[3], item_uids[4]]
+
+        item_uids = new_item_uids
+
+        response = assert_response(
+            await client.post(
+                "/queue/queue/item/move/batch", params={"pos_dest": 0}, json={"uids": [item_uids[4], item_uids[3]]}
+            )
+        )
+        assert [_i["item_uid"] for _i in response.json()["items"]] == [item_uids[3], item_uids[4]]
+
+        response = assert_response(await client.get("/queue/queue/get"))
+        new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+        assert new_item_uids == [item_uids[3], item_uids[4], item_uids[0], item_uids[1], item_uids[2]]
+
+        item_uids = new_item_uids
+
+        response = assert_response(
+            await client.post(
+                "/queue/queue/item/move/batch",
+                params={"pos_dest": "back", "reorder": True},
+                json={"uids": [item_uids[1], item_uids[3], item_uids[2]]},
+            )
+        )
+        assert [_i["item_uid"] for _i in response.json()["items"]] == [item_uids[1], item_uids[3], item_uids[2]]
+
+        response = assert_response(await client.get("/queue/queue/get"))
+        new_item_uids = [_i["item_uid"] for _i in response.json()["items"]]
+
+        assert new_item_uids == [item_uids[0], item_uids[4], item_uids[1], item_uids[3], item_uids[2]]
+
     async def test_queue_add_count(self, client: httpx.AsyncClient):
         item = QueueItem(name="count", args=[["rand"]], kwargs={"num": 10})
         request_body = {"item": item.model_dump(mode="json")}

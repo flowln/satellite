@@ -229,6 +229,80 @@ class TestWithSingleEnvironment:
 
         assert new_item_uids == [item_uids[1], item_uids[2], item_uids[0]]
 
+    async def test_queue_item_move_in_batch(self, python_client: AsyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        response = await python_client.queue_item_add_batch([item] * 5)
+        assert response.success, response.msg
+
+        if True:
+            assert response.items is not None
+            item_uids = [_i.uid for _i in response.items if _i.uid is not None]
+
+            response = await python_client.queue_item_move_batch(
+                [item_uids[0], item_uids[1]], after_uid=str(item_uids[2])
+            )
+            assert response.success, response.msg
+
+            assert response.items is not None and [_i.uid for _i in response.items] == [item_uids[0], item_uids[1]]
+
+            response = await python_client.queue_get()
+            assert response.success, response.msg
+
+            new_item_uids = [_i.uid for _i in response.items if _i.uid is not None]
+
+            assert new_item_uids == [item_uids[2], item_uids[0], item_uids[1], item_uids[3], item_uids[4]]
+
+            item_uids = new_item_uids
+
+        if True:
+            response = await python_client.queue_item_move_batch([item_uids[1], item_uids[3], item_uids[2]], pos_dest=0)
+            assert response.success, response.msg
+
+            assert response.items is not None and [_i.uid for _i in response.items] == [
+                item_uids[1],
+                item_uids[2],
+                item_uids[3],
+            ]
+
+            response = await python_client.queue_get()
+            assert response.success, response.msg
+
+            new_item_uids = [_i.uid for _i in response.items if _i.uid is not None]
+
+            assert new_item_uids == [item_uids[1], item_uids[2], item_uids[3], item_uids[0], item_uids[4]]
+
+            item_uids = new_item_uids
+
+        if True:
+            response = await python_client.queue_item_move_batch(
+                [item_uids[4], item_uids[3]], pos_dest="back", reorder=True
+            )
+            assert response.success, response.msg
+
+            assert response.items is not None and [_i.uid for _i in response.items] == [item_uids[4], item_uids[3]]
+
+            response = await python_client.queue_get()
+            assert response.success, response.msg
+
+            new_item_uids = [_i.uid for _i in response.items if _i.uid is not None]
+
+            assert new_item_uids == [item_uids[0], item_uids[1], item_uids[2], item_uids[4], item_uids[3]]
+
+            item_uids = new_item_uids
+
+        if True:
+            response = await python_client.queue_item_move_batch([item_uids[2]], before_uid=str(item_uids[2]))
+            assert response.success, response.msg
+
+            assert response.items is not None and [_i.uid for _i in response.items] == [item_uids[2]]
+
+            response = await python_client.queue_get()
+            assert response.success, response.msg
+
+            new_item_uids = [_i.uid for _i in response.items if _i.uid is not None]
+
+            assert new_item_uids == item_uids
+
 
 @pytest.fixture
 async def python_client_with_auth(monkeypatch, tmp_path):

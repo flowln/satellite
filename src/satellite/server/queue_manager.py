@@ -1175,6 +1175,99 @@ class QueueManager:
 
         return ret
 
+    @post_endpoint("/queue/item/move/batch", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    async def queue_item_move_in_batch(
+        self,
+        uids: Annotated[list[UUID], Body(embed=True)],
+        destination_position: Annotated[int | Literal["front", "back"] | None, Query(alias="pos_dest")] = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        reorder: bool = False,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Move some items to another position on the queue.
+
+        Parameters
+        uids : sequence of UUIDs
+            The unique identifiers of the items to move.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        reorder : bool, optional
+            If True, reorder the moved items to be in the same order as the 'uids' sequence.
+            Otherwise (default), keep the original ordering of items.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveBatchResponse()
+        ret.items = []
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        original_uids: list[tuple[UUID, int | None]] = []
+        try:
+            for uid in uids:
+                original_uids.append((uid, await self._get_queue_position(uid=uid)))
+
+            # NOTE: This seems weird at first glance, but before doing 'sorted', the list is in the
+            # order that the uids came in. Here, we sort by the current queue positions if needed.
+            if not reorder:
+                original_uids = sorted(original_uids, key=lambda x: x[1])
+        except RuntimeError as exc:
+            ret.success = False
+            ret.msg = str(exc)
+            return ret
+
+        parse_response, destination_position = await self._parse_ending_queue_position(
+            pos=destination_position, before_uid=before_uid, after_uid=after_uid
+        )
+        if not parse_response.success:
+            ret.success = parse_response.success
+            ret.msg = parse_response.msg
+            return ret
+
+        for uid, _ in original_uids:
+            # Avoid the call to 'queue_item_move' thinking we didn't pass any arguments
+            if destination_position is None:
+                destination_position = "back"
+
+            item_response = await self.queue_item_move(
+                uid=uid, destination_position=destination_position, lock_key=lock_key
+            )
+            if not item_response.success:
+                ret.success = item_response.success
+                ret.msg = item_response.msg
+                return ret
+
+            # Get next position - after the just-moved item
+            parse_response, destination_position = await self._parse_ending_queue_position(after_uid=uid)
+            if not parse_response.success:
+                ret.success = parse_response.success
+                ret.msg = parse_response.msg
+                return ret
+
+            ret.items.append(item_response.item)
+
+        ret.queue_size = self._status.items_in_queue
+        return ret
+
     @post_endpoint("/queue/start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])
     async def queue_start(
         self,

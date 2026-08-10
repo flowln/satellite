@@ -6,10 +6,10 @@ import logging
 import os
 import subprocess
 import time
-from typing import Annotated, Any, Literal, cast, no_type_check
+from typing import Annotated, Any, Literal, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter, Body, Security
+from fastapi import APIRouter, Body, Query, Security
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -31,6 +31,7 @@ from ..models import (
     HistoryResponse,
     LatestConsoleResponse,
     ManagerStatus,
+    QueueAddRemoveBatchResponse,
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
@@ -154,7 +155,7 @@ class QueueManager:
 
         return self._router
 
-    async def _check_for_enqueued_message(self, force_update_status: bool) -> Any:
+    async def _check_for_enqueued_message(self, force_update_status: bool, *, bypass: bool = False) -> Any:
         """
         Retrieve a new message from the environment, if available.
 
@@ -163,6 +164,8 @@ class QueueManager:
         force_update_status : bool
             If True, change the manager state uid and modification time even when
             the actual state remains the same.
+        bypass : bool, optional
+            If True, return the enqueued message without going through the default handlers.
 
         Returns
         -------
@@ -182,6 +185,10 @@ class QueueManager:
         return_value = enqueued_message
 
         self._logger.debug("Received new message from environment: %s", str(enqueued_message))
+
+        if bypass:
+            return return_value
+
         match enqueued_message:
             case CloseEnvironmentResult(_uuid):
                 pass
@@ -222,7 +229,14 @@ class QueueManager:
                 self._status.plan_history_uid = create_uuid()
                 self._status.items_in_history += 1
 
-                if self._status.queue_stop_pending or self._status.items_in_queue == 0 or stop_queue:
+                stop_execution = (
+                    self._status.queue_stop_pending
+                    or self._status.items_in_queue == 0
+                    or stop_queue
+                    or item.execute_method == "execute"
+                )
+
+                if stop_execution:
                     self._status.queue_stop_pending = False
 
                     await self._status.update_manager_state("idle", force=force_update_status)
@@ -305,7 +319,7 @@ class QueueManager:
         while (await self._check_for_enqueued_message(force_update_status)) is not None:
             pass
 
-    async def _ask_environment(self, req_class: type, rsp_class: type, *args, **kwargs) -> Any:
+    async def _ask_environment(self, req_class: type, rsp_class: type, *args, bypass: bool = False, **kwargs) -> Any:
         """
         Ask the environment for something, and wait for it to respond.
 
@@ -317,6 +331,8 @@ class QueueManager:
             Type of the response expected from the environment
         *args : Sequence[typing.Any]
             Arguments to construct the request object with.
+        bypass : bool, optional
+            If True, bypass the default response handlers.
         **kwargs : dict[str, typing.Any]
             Keyword arguments to construct the request object with.
 
@@ -342,7 +358,7 @@ class QueueManager:
 
         _initial_time = time.time()
         while time.time() - _initial_time <= 5.0:
-            return_value = await self._check_for_enqueued_message(False)
+            return_value = await self._check_for_enqueued_message(False, bypass=bypass)
 
             if return_value is not None and isinstance(return_value, rsp_class) and return_value.uuid == message_uuid:
                 response = return_value
@@ -711,6 +727,102 @@ class QueueManager:
 
         return ret
 
+    async def _validate_queue_item[T: GenericResponse](self, ret: T, item: QueueItem, *, user_group: str) -> T:
+        if item.type == "plan":
+            group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
+            if user_group in group_permissions and not group_permissions[user_group].is_plan_allowed(item.name):
+                ret.success = False
+                ret.msg = (
+                    "Failed to add item to queue:"
+                    f"The current user (group: '{user_group}') doesn't have access to plan '{item.name}'."
+                )
+                return ret
+
+            annotation = await self._retrieve_annotation_for_plan(item)
+
+            if annotation is None:
+                ret.success = False
+                ret.msg = f"Failed to add item to queue: The specified plan '{item.name}' doesn't exist."
+                return ret
+
+            device_annotations = await self._retrieve_device_annotations()
+            try:
+                validate_plan(
+                    annotation,
+                    item.args,
+                    item.kwargs,
+                    device_annotations=device_annotations,
+                )
+            except ValidationError as exc:
+                ret.success = False
+                ret.msg = f"Failed to add item to queue: Validation failed - {str(exc)}"
+                return ret
+
+        return ret
+
+    async def _get_queue_position(
+        self, position: int | Literal["front", "back"] | None = None, uid: UUID | str | None = None
+    ) -> int | None:
+        """Common method for retrieving the index of a queue item."""
+        if uid is not None:
+            index, _ = await self._persistence_backend.queue_get_item(uuid=uid)
+            return index
+
+        if isinstance(position, int):
+            return position
+
+        match position:
+            case "front":
+                return 0
+            case "back":
+                return None
+            case None:
+                pass
+
+        raise RuntimeError("Failed to calculate queue position: Both 'position' and 'uid' are None.")
+
+    async def _parse_ending_queue_position(
+        self,
+        pos: int | Literal["front", "back"] | None = None,
+        before_uid: UUID | str | None = None,
+        after_uid: UUID | str | None = None,
+    ) -> tuple[GenericResponse, int | None]:
+        """Common method for parsing destination position arguments into a queue position index."""
+        ret = GenericResponse()
+
+        set_position_parameters = [_p for _p in {"pos", "before_uid", "after_uid"} if locals()[_p] is not None]
+        if len(set_position_parameters) != 1:
+            ret.success = False
+            ret.msg = (
+                "Failed to add item to queue:"
+                " Exactly one of 'pos', 'before_uid' or 'after_uid' must be set"
+                f" (instead of {set_position_parameters})."
+            )
+            return ret, None
+
+        try:
+            uid = before_uid or after_uid
+            index = await self._get_queue_position(position=pos, uid=uid)
+
+            if after_uid is not None and isinstance(index, int):
+                if index == self._status.items_in_queue - 1:
+                    index = None
+                else:
+                    index += 1
+        except Exception:
+            ret.success = False
+            ret.msg = f"Failed to add item to queue: No item with uid '{uid}' could be found."
+            return ret, None
+
+        if isinstance(index, int) and index >= self._status.items_in_queue:
+            ret.success = False
+            ret.msg = (
+                f"Failed to add item to queue: Position '{index}' is outside the range allowed in the current queue."
+            )
+            return ret, None
+
+        return ret, index
+
     @post_endpoint("/queue/item/add")
     async def queue_item_add(
         self,
@@ -721,6 +833,8 @@ class QueueManager:
         user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
         user_group: Annotated[str, Security(get_current_user_group)] = "primary",
         lock_key: str | None = None,
+        *,
+        ignore_validation: Annotated[bool, Query(include_in_schema=False)] = False,
     ) -> QueueAddRemoveResponse:
         """
         Add a new item to the queue.
@@ -765,35 +879,9 @@ class QueueManager:
         if lock_key is not None:
             ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
-        # Validate item
-        if item.type == "plan":
-            group_permissions = self._configuration.authorization.resource_access_authorization.group_permissions
-            if user_group in group_permissions and not group_permissions[user_group].is_plan_allowed(item.name):
-                ret.success = False
-                ret.msg = (
-                    "Failed to add item to queue:"
-                    f"The current user (group: '{user_group}') doesn't have access to plan '{item.name}'."
-                )
-                return ret
-
-            annotation = await self._retrieve_annotation_for_plan(item)
-
-            if annotation is None:
-                ret.success = False
-                ret.msg = f"Failed to add item to queue: The specified plan '{item.name}' doesn't exist."
-                return ret
-
-            device_annotations = await self._retrieve_device_annotations()
-            try:
-                validate_plan(
-                    annotation,
-                    item.args,
-                    item.kwargs,
-                    device_annotations=device_annotations,
-                )
-            except ValidationError as exc:
-                ret.success = False
-                ret.msg = f"Failed to add item to queue: Validation failed - {str(exc)}"
+        if not ignore_validation:
+            ret = await self._validate_queue_item(ret, item, user_group=user_group)
+            if not ret.success:
                 return ret
 
         # Populate information
@@ -805,35 +893,13 @@ class QueueManager:
 
         item.uid = create_uuid()
 
-        # Insert in the queue at the correct position
-        if before_uid is not None or after_uid is not None:
-            uid = cast(str, before_uid or after_uid)
+        parse_return, index = await self._parse_ending_queue_position(pos, before_uid, after_uid)
+        if not parse_return.success:
+            ret.success = parse_return.success
+            ret.msg = parse_return.msg
+            return ret
 
-            try:
-                position, _ = await self._persistence_backend.queue_get_item(uuid=uid)
-            except Exception:
-                ret.success = False
-                ret.msg = f"Failed to add item to queue: No item with uid '{uid}' could be found."
-                return ret
-
-            if after_uid is not None:
-                position += 1
-
-            await self._persistence_backend.queue_insert_item(item, position)
-        else:
-            match pos:
-                case "front":
-                    await self._persistence_backend.queue_insert_item(item, 0)
-                case "back":
-                    await self._persistence_backend.queue_insert_item(item, None)
-                case index:
-                    if index >= self._status.items_in_queue:
-                        ret.success = False
-                        ret.msg = "Failed to add item to queue:"
-                        f"Position '{index}' is outside the range allowed in the current queue."
-                        return ret
-
-                    await self._persistence_backend.queue_insert_item(item, index)
+        await self._persistence_backend.queue_insert_item(item, index)
 
         # Prepare return
         self._status.plan_queue_uid = create_uuid()
@@ -843,6 +909,93 @@ class QueueManager:
         ret.item = item
 
         await self.check_environment_process(force_update_status=True)
+
+        return ret
+
+    @post_endpoint("/queue/item/add/batch")
+    async def queue_item_add_in_batch(
+        self,
+        items: Annotated[list[QueueItem], Body(embed=True)],
+        pos: int | Literal["front", "back"] = "back",
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        items : sequence of QueueItem
+            The items to add to the queue.
+
+            The 'item_uid' field is expected to be null, as it will be filled up after this call.
+        pos : int, "back" or "front", optional
+            The position in which to add this item in the queue.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveBatchResponse()
+
+        for item in items:
+            item_return = GenericResponse()
+            item_return = await self._validate_queue_item(item_return, item, user_group=user_group)
+
+            if not item_return.success:
+                ret.success = item_return.success
+                ret.msg = item_return.msg
+
+                return ret
+
+        new_items = []
+        for item in items:
+            item_return = await self.queue_item_add(
+                item=item,
+                pos=pos,
+                before_uid=before_uid,
+                after_uid=after_uid,
+                user=user,
+                user_group=user_group,
+                lock_key=lock_key,
+                ignore_validation=True,
+            )
+
+            if not item_return.success:
+                ret.success = item_return.success
+                ret.msg = item_return.msg
+
+                return ret
+
+            new_items.append(item_return.item)
+
+        ret.queue_size = self._status.items_in_queue
+        ret.items = new_items
 
         return ret
 
@@ -918,6 +1071,348 @@ class QueueManager:
         ret.item = item
 
         await self.check_environment_process(force_update_status=True)
+
+        return ret
+
+    @post_endpoint("/queue/item/remove/batch", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    async def queue_item_remove_in_batch(
+        self, uids: Annotated[list[UUID], Body(embed=True)], ignore_missing: bool = True, lock_key: str | None = None
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Remove multiple items from the queue.
+
+        Parameters
+        ----------
+        uids : sequence of UUIDs
+            Remove all items with the given UUIDs.
+        ignore_missing : bool, optional
+            If True (default), remove all items matching the given UUIDs, and ignore
+            any missing items. Otherwise, any missing items will fail the operation,
+            and the method will return the items that have been removed.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveBatchResponse()
+        ret.items = []
+
+        for uid in uids:
+            item_return = await self.queue_item_remove(uid=str(uid), lock_key=lock_key)
+
+            if not item_return.success and not ignore_missing:
+                ret.success = item_return.success
+                ret.msg = item_return.msg
+
+                return ret
+
+            if item_return.success:
+                ret.items.append(item_return.item)
+
+        ret.queue_size = self._status.items_in_queue
+        return ret
+
+    @post_endpoint("/queue/item/update")
+    async def queue_item_update(
+        self,
+        item: Annotated[QueueItem, Body(embed=True)],
+        replace: bool = False,
+        user: Annotated[str, Security(get_current_user, scopes=["write:queue:edit"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        item : QueueItem
+            A queue item with updated information to commit to the queue.
+
+            The 'item_uid' field is expected to be filled, as the item to be updated is determined from it.
+        replace : bool, optional
+            Whether to replace the existing item. The practial consequence of using this option is that a new uid
+            is generated for the item, instead of keeping the uid of the replaced item. False by default.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        if item.uid is None:
+            ret.success = False
+            ret.msg = "Failed to update item: The provided item has no uid."
+            return ret
+
+        ret = await self._validate_queue_item(ret, item, user_group=user_group)
+        if not ret.success:
+            return ret
+
+        try:
+            position_in_queue = await self._get_queue_position(uid=item.uid)
+        except RuntimeError:
+            ret.success = False
+            ret.msg = "Failed to update item: No item with such uid exists on the queue."
+            return ret
+
+        item.last_modification_user = user
+        item.last_modification_user_group = user_group
+
+        if replace:
+            item.uid = create_uuid()
+
+        await self._persistence_backend.queue_pop_item(position_in_queue)
+        ret.queue_size = await self._persistence_backend.queue_insert_item(item, position_in_queue)
+
+        ret.item = item
+
+        return ret
+
+    @post_endpoint("/queue/item/move", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    async def queue_item_move(
+        self,
+        original_position: Annotated[int | Literal["front", "back"] | None, Query(alias="pos")] = None,
+        uid: UUID | None = None,
+        destination_position: Annotated[int | Literal["front", "back"] | None, Query(alias="pos_dest")] = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Move an item to another position on the queue.
+
+        Parameters
+        ----------
+        pos : int, "back" or "front", optional
+            The original position of the item to move.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'uid'.
+        uid : UUID, optional
+            The unique identifier of the item to move.
+
+            This option cannot be specified at the same time as 'pos'.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        try:
+            original_index = await self._get_queue_position(position=original_position, uid=uid)
+        except RuntimeError as exc:
+            ret.success = False
+            ret.msg = str(exc)
+            return ret
+
+        parse_response, destination_index = await self._parse_ending_queue_position(
+            pos=destination_position, before_uid=before_uid, after_uid=after_uid
+        )
+        if not parse_response.success:
+            ret.success = parse_response.success
+            ret.msg = parse_response.msg
+            return ret
+
+        item = await self._persistence_backend.queue_pop_item(original_index)
+        if destination_index is not None and original_index is not None and original_index < destination_index:
+            destination_index -= 1
+        await self._persistence_backend.queue_insert_item(item, destination_index)
+
+        ret.queue_size = self._status.items_in_queue
+        ret.item = item
+
+        return ret
+
+    @post_endpoint("/queue/item/move/batch", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
+    async def queue_item_move_in_batch(
+        self,
+        uids: Annotated[list[UUID], Body(embed=True)],
+        destination_position: Annotated[int | Literal["front", "back"] | None, Query(alias="pos_dest")] = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        reorder: bool = False,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Move some items to another position on the queue.
+
+        Parameters
+        uids : sequence of UUIDs
+            The unique identifiers of the items to move.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        reorder : bool, optional
+            If True, reorder the moved items to be in the same order as the 'uids' sequence.
+            Otherwise (default), keep the original ordering of items.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveBatchResponse()
+        ret.items = []
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        original_uids: list[tuple[UUID, int | None]] = []
+        try:
+            for uid in uids:
+                original_uids.append((uid, await self._get_queue_position(uid=uid)))
+
+            # NOTE: This seems weird at first glance, but before doing 'sorted', the list is in the
+            # order that the uids came in. Here, we sort by the current queue positions if needed.
+            if not reorder:
+                original_uids = sorted(original_uids, key=lambda x: x[1])
+        except RuntimeError as exc:
+            ret.success = False
+            ret.msg = str(exc)
+            return ret
+
+        parse_response, destination_position = await self._parse_ending_queue_position(
+            pos=destination_position, before_uid=before_uid, after_uid=after_uid
+        )
+        if not parse_response.success:
+            ret.success = parse_response.success
+            ret.msg = parse_response.msg
+            return ret
+
+        for uid, _ in original_uids:
+            # Avoid the call to 'queue_item_move' thinking we didn't pass any arguments
+            if destination_position is None:
+                destination_position = "back"
+
+            item_response = await self.queue_item_move(
+                uid=uid, destination_position=destination_position, lock_key=lock_key
+            )
+            if not item_response.success:
+                ret.success = item_response.success
+                ret.msg = item_response.msg
+                return ret
+
+            # Get next position - after the just-moved item
+            parse_response, destination_position = await self._parse_ending_queue_position(after_uid=uid)
+            if not parse_response.success:
+                ret.success = parse_response.success
+                ret.msg = parse_response.msg
+                return ret
+
+            ret.items.append(item_response.item)
+
+        ret.queue_size = self._status.items_in_queue
+        return ret
+
+    @post_endpoint("/queue/item/execute")
+    async def execute_item(
+        self,
+        item: Annotated[QueueItem, Body(embed=True)],
+        user: Annotated[str, Security(get_current_user, scopes=["write:manager:control"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Immediately execute an item, bypassing the queue current state and options.
+
+        Parameters
+        ----------
+        item : QueueItem
+            The item to execute immediately.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        await self.check_environment_process()
+
+        if not self._status.worker_environment_exists:
+            ret.success = False
+            ret.msg = "Failed to execute item: No execution environment exists."
+            return ret
+
+        if self._status.manager_state != "idle":
+            ret.success = False
+            ret.msg = "Failed to execute item: Manager is not in the 'idle' state."
+            return ret
+
+        ret = await self._validate_queue_item(ret, item, user_group=user_group)
+        if not ret.success:
+            return ret
+
+        item.execute_method = "execute"
+
+        item.last_modification_user = user
+        item.last_modification_user_group = user_group
+
+        if item.uid is None:
+            item.uid = create_uuid()
+
+        env_return = await self._ask_environment(RunProvidedItem, RunProvidedItemResponse, item, bypass=True)
+        if env_return is None:
+            ret.success = False
+            ret.msg = "Failed to execute item: Failed to submit item for execution."
+
+        self._status.running_item_uid = item.uid
+
+        ret.queue_size = self._status.items_in_queue
+        ret.item = item
 
         return ret
 

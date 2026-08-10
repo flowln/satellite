@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-08T20:33+00:00
-Git revision: 151253802731889e2b28e872a1a587a3a1c8b5a7
+Date: 2026-08-10T20:43+00:00
+Git revision: 3505a0e8de205b1a6410f53f829f7b3c247a6977
 """
 
 from abc import abstractmethod
@@ -25,6 +25,7 @@ from satellite.models import (
     HistoryResponse,
     LatestConsoleResponse,
     ManagerStatus,
+    QueueAddRemoveBatchResponse,
     QueueAddRemoveResponse,
     QueueItem,
     QueueResponse,
@@ -288,6 +289,71 @@ class BaseAsyncClient(httpx.AsyncClient):
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
+    async def queue_item_add_batch(
+        self,
+        items: list[QueueItem],
+        pos: int | Literal["front", "back"] = "back",
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        items : sequence of QueueItem
+            The items to add to the queue.
+
+            The 'item_uid' field is expected to be null, as it will be filled up after this call.
+        pos : int, "back" or "front", optional
+            The position in which to add this item in the queue.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        original_parameters = {
+            "items": items,
+            "pos": pos,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/add/batch", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
     async def queue_item_remove(
         self, pos: int | Literal["front", "back"] | None = None, uid: str | None = None, lock_key: str | None = None
     ) -> QueueAddRemoveResponse:
@@ -322,6 +388,242 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/remove", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_remove_batch(
+        self, uids: list[UUID], ignore_missing: bool = True, lock_key: str | None = None
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Remove multiple items from the queue.
+
+        Parameters
+        ----------
+        uids : sequence of UUIDs
+            Remove all items with the given UUIDs.
+        ignore_missing : bool, optional
+            If True (default), remove all items matching the given UUIDs, and ignore
+            any missing items. Otherwise, any missing items will fail the operation,
+            and the method will return the items that have been removed.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"ignore_missing": True, "lock_key": None}
+        original_parameters = {"uids": uids, "ignore_missing": ignore_missing, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/remove/batch", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_update(
+        self, item: QueueItem, replace: bool = False, lock_key: str | None = None
+    ) -> QueueAddRemoveResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        item : QueueItem
+            A queue item with updated information to commit to the queue.
+
+            The 'item_uid' field is expected to be filled, as the item to be updated is determined from it.
+        replace : bool, optional
+            Whether to replace the existing item. The practial consequence of using this option is that a new uid
+            is generated for the item, instead of keeping the uid of the replaced item. False by default.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"replace": False, "lock_key": None}
+        original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/update", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_move(
+        self,
+        pos: int | Literal["front", "back"] | None = None,
+        uid: UUID | None = None,
+        pos_dest: int | Literal["front", "back"] | None = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Move an item to another position on the queue.
+
+        Parameters
+        ----------
+        pos : int, "back" or "front", optional
+            The original position of the item to move.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'uid'.
+        uid : UUID, optional
+            The unique identifier of the item to move.
+
+            This option cannot be specified at the same time as 'pos'.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {
+            "pos": None,
+            "uid": None,
+            "pos_dest": None,
+            "before_uid": None,
+            "after_uid": None,
+            "lock_key": None,
+        }
+        original_parameters = {
+            "pos": pos,
+            "uid": uid,
+            "pos_dest": pos_dest,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/move", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_move_batch(
+        self,
+        uids: list[UUID],
+        pos_dest: int | Literal["front", "back"] | None = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        reorder: bool = False,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Move some items to another position on the queue.
+
+        Parameters
+        uids : sequence of UUIDs
+            The unique identifiers of the items to move.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        reorder : bool, optional
+            If True, reorder the moved items to be in the same order as the 'uids' sequence.
+            Otherwise (default), keep the original ordering of items.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False, "lock_key": None}
+        original_parameters = {
+            "uids": uids,
+            "pos_dest": pos_dest,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "reorder": reorder,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/move/batch", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_execute(self, item: QueueItem, lock_key: str | None = None) -> QueueAddRemoveResponse:
+        """
+        Immediately execute an item, bypassing the queue current state and options.
+
+        Parameters
+        ----------
+        item : QueueItem
+            The item to execute immediately.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"lock_key": None}
+        original_parameters = {"item": item, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/execute", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
@@ -880,6 +1182,71 @@ class BaseSyncClient:
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
+    def queue_item_add_batch(
+        self,
+        items: list[QueueItem],
+        pos: int | Literal["front", "back"] = "back",
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        items : sequence of QueueItem
+            The items to add to the queue.
+
+            The 'item_uid' field is expected to be null, as it will be filled up after this call.
+        pos : int, "back" or "front", optional
+            The position in which to add this item in the queue.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        original_parameters = {
+            "items": items,
+            "pos": pos,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/add/batch", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
     def queue_item_remove(
         self, pos: int | Literal["front", "back"] | None = None, uid: str | None = None, lock_key: str | None = None
     ) -> QueueAddRemoveResponse:
@@ -914,6 +1281,242 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/remove", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_remove_batch(
+        self, uids: list[UUID], ignore_missing: bool = True, lock_key: str | None = None
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Remove multiple items from the queue.
+
+        Parameters
+        ----------
+        uids : sequence of UUIDs
+            Remove all items with the given UUIDs.
+        ignore_missing : bool, optional
+            If True (default), remove all items matching the given UUIDs, and ignore
+            any missing items. Otherwise, any missing items will fail the operation,
+            and the method will return the items that have been removed.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"ignore_missing": True, "lock_key": None}
+        original_parameters = {"uids": uids, "ignore_missing": ignore_missing, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/remove/batch", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_update(
+        self, item: QueueItem, replace: bool = False, lock_key: str | None = None
+    ) -> QueueAddRemoveResponse:
+        """
+        Add new items to the queue.
+
+        Parameters
+        ----------
+        item : QueueItem
+            A queue item with updated information to commit to the queue.
+
+            The 'item_uid' field is expected to be filled, as the item to be updated is determined from it.
+        replace : bool, optional
+            Whether to replace the existing item. The practial consequence of using this option is that a new uid
+            is generated for the item, instead of keeping the uid of the replaced item. False by default.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"replace": False, "lock_key": None}
+        original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/update", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_move(
+        self,
+        pos: int | Literal["front", "back"] | None = None,
+        uid: UUID | None = None,
+        pos_dest: int | Literal["front", "back"] | None = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Move an item to another position on the queue.
+
+        Parameters
+        ----------
+        pos : int, "back" or "front", optional
+            The original position of the item to move.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'uid'.
+        uid : UUID, optional
+            The unique identifier of the item to move.
+
+            This option cannot be specified at the same time as 'pos'.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {
+            "pos": None,
+            "uid": None,
+            "pos_dest": None,
+            "before_uid": None,
+            "after_uid": None,
+            "lock_key": None,
+        }
+        original_parameters = {
+            "pos": pos,
+            "uid": uid,
+            "pos_dest": pos_dest,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/move", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_move_batch(
+        self,
+        uids: list[UUID],
+        pos_dest: int | Literal["front", "back"] | None = None,
+        before_uid: str | None = None,
+        after_uid: str | None = None,
+        reorder: bool = False,
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveBatchResponse:
+        """
+        Move some items to another position on the queue.
+
+        Parameters
+        uids : sequence of UUIDs
+            The unique identifiers of the items to move.
+        pos_dest : int, "back" or "front", optional
+            The position to move the item to.
+
+            "back" (default) means adding it as the last item in the current queue.
+
+            "front" means adding it as the first item in the current queue.
+
+            An integer specifies an index in which to insert the item into.
+
+            This option cannot be specified at the same time as 'before_uid' or 'after_uid'.
+        before_uid : str, optional
+            Insert the item before (i.e. executes first) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'after_uid'.
+        after_uid : str, optional
+            Insert the item after (i.e. executes afterwards) the item with the specified uid.
+
+            This option cannot be specified at the same time as 'pos' or 'before_uid'.
+        reorder : bool, optional
+            If True, reorder the moved items to be in the same order as the 'uids' sequence.
+            Otherwise (default), keep the original ordering of items.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False, "lock_key": None}
+        original_parameters = {
+            "uids": uids,
+            "pos_dest": pos_dest,
+            "before_uid": before_uid,
+            "after_uid": after_uid,
+            "reorder": reorder,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/move/batch", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_execute(self, item: QueueItem, lock_key: str | None = None) -> QueueAddRemoveResponse:
+        """
+        Immediately execute an item, bypassing the queue current state and options.
+
+        Parameters
+        ----------
+        item : QueueItem
+            The item to execute immediately.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"lock_key": None}
+        original_parameters = {"item": item, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/execute", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret

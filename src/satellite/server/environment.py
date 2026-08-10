@@ -478,6 +478,11 @@ class EnvironmentProcess:
 
         result = future.result()
 
+        if self._run_engine.state != "idle":
+            self._run_engine._resume_task()  # noqa: SLF001
+        if self._run_engine.state != "idle":
+            self._logger.error("Run engine did not properly stop.")
+
         await self._handle_run_engine_result(result)
 
         self._current_history_item.exit_status = "aborted" if abort else ("halted" if halt else "stopped")

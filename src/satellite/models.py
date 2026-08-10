@@ -140,6 +140,9 @@ class QueueItem(BaseModel):
     type: Literal["plan", "instruction"] = Field(alias="item_type", default="plan")
     """Type of operation this item represents."""
 
+    execute_method: Literal["queue", "execute"] = Field(default="queue")
+    """Whether this item was directly executed, or ran as a normal queue submission."""
+
     name: str
     """
     Human-readable name of this item.
@@ -241,6 +244,16 @@ class QueueAddRemoveResponse(GenericResponse):
 
     item: QueueItem | None = None
     """The inserted / removed item, with the 'uid' attribute filled in. If 'success' = False, None is returned."""
+
+
+class QueueAddRemoveBatchResponse(GenericResponse):
+    """Data returned by the '/queue/item/add/batch' and '/queue/item/remove/batch' operations."""
+
+    queue_size: int | None = Field(alias="qsize", default=None)
+    """Total number of items in the queue after the operation. If 'success' = False, None is returned instead."""
+
+    items: Sequence[QueueItem] | None = None
+    """The inserted / removed items, with the 'uid' attribute filled in. If 'success' = False, None is returned."""
 
 
 class RunEngineRunsResponse(GenericResponse):

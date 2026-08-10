@@ -144,7 +144,7 @@ class PersistenceBackend:
     ) -> tuple[int, dict[str, Any]]: ...
 
     @abstractmethod
-    async def _list_insert_item(self, key: str, item: Any, index: int | None = 0) -> bool: ...
+    async def _list_insert_item(self, key: str, item: Any, index: int | None = 0) -> int: ...
 
     @abstractmethod
     async def _list_pop_item(self, key: str, index: int = 0) -> dict[str, Any]: ...
@@ -193,7 +193,7 @@ class PersistenceBackend:
         return idx, QueueItem.model_validate(raw_item, by_alias=True)
 
     @backend_to_http_exception
-    async def queue_insert_item(self, item: QueueItem, index: int | None = 0) -> bool:
+    async def queue_insert_item(self, item: QueueItem, index: int | None = 0) -> int:
         """
         Insert a new item on the queue.
 
@@ -204,6 +204,11 @@ class PersistenceBackend:
         index : int, optional
             The place in which the item is to be added. The special value 'None' specifies
             that the item should be added at the very end of the queue. Defaults to 0.
+
+        Returns
+        -------
+        int
+            New queue size after the insertion.
         """
         key = self.full_key_prefix + self.key_separator() + self.QUEUE_KEY
         return await self._list_insert_item(key, item, index)
@@ -274,7 +279,7 @@ class PersistenceBackend:
         return idx, HistoryItem.model_validate(raw_item, by_alias=True)
 
     @backend_to_http_exception
-    async def history_insert_item(self, item: HistoryItem, index: int | None = 0) -> bool:
+    async def history_insert_item(self, item: HistoryItem, index: int | None = 0) -> int:
         """
         Insert a new item on the history.
 
@@ -285,6 +290,11 @@ class PersistenceBackend:
         index : int, optional
             The place in which the item is to be added. The special value 'None' specifies
             that the item should be added at the very end of the history. Defaults to 0.
+
+        Returns
+        -------
+        int
+            New history size after the insertion.
         """
         key = self.full_key_prefix + self.key_separator() + self.HISTORY_KEY
         return await self._list_insert_item(key, item, index)
@@ -478,21 +488,21 @@ class RedisPersistenceBackend(PersistenceBackend):
 
         raise RuntimeError(f"Failed to properly retrieve item ({index=} {uuid=}) from Redis: {raw_items}")
 
-    async def _list_insert_item(self, key: str, item: QueueItem, index: int | None = 0) -> bool:
+    async def _list_insert_item(self, key: str, item: QueueItem, index: int | None = 0) -> int:
         await self._ensure_initialized(key)
 
         item_serialized = item.model_dump(mode="json", by_alias=True)
 
         if index is None:
-            return (
-                cast(
-                    list[int],
-                    await self._client.json().arrappend(key, "$", item_serialized),
-                )[0]
-                >= 1
-            )
+            return cast(
+                list[int],
+                await self._client.json().arrappend(key, "$", item_serialized),
+            )[0]
 
-        return (await self._client.json().arrinsert(key, "$", index, item_serialized)) == 1
+        ret = await self._client.json().arrinsert(key, "$", index, item_serialized)
+        if isinstance(ret, list):
+            return cast(int, ret[0])
+        return cast(int, ret)
 
     async def _list_pop_item(self, key: str, index: int = 0) -> dict[str, Any]:
         await self._ensure_initialized(key)

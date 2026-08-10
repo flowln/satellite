@@ -232,18 +232,38 @@ def _clear_fastapi_dependencies_from_args(node: ast.AsyncFunctionDef) -> ast.Asy
             elif not isinstance(argument.annotation.slice, ast.Tuple):
                 pass
             else:
+
+                def _is_deprecated(k: ast.keyword) -> bool:
+                    return k.arg == "deprecated" and isinstance(k.value, ast.Constant) and bool(k.value.value)
+
+                def _is_excluded(k: ast.keyword) -> bool:
+                    return (
+                        k.arg == "include_in_schema" and isinstance(k.value, ast.Constant) and not bool(k.value.value)
+                    )
+
+                def _get_alias_name(keywords: list[ast.keyword]) -> str | None:
+                    for keyword in keywords:
+                        if keyword.arg == "alias" and isinstance(keyword.value, ast.Constant):
+                            return str(keyword.value.value)
+
                 match argument.annotation.slice.elts:
                     # If it's a non-deprecated Body-annotated argument, keep it.
                     case [real_type_annotation, ast.Call(func=ast.Name(id="Body"), keywords=keywords)]:
-
-                        def _is_deprecated(k: ast.keyword) -> bool:
-                            return k.arg == "deprecated" and isinstance(k.value, ast.Constant) and bool(k.value.value)
-
                         if not any(_is_deprecated(_k) for _k in keywords):
                             argument.annotation = real_type_annotation
                         else:
                             _remove_argument(arg_idx)
                             continue
+                    case [real_type_annotation, ast.Call(func=ast.Name(id="Query"), keywords=keywords)]:
+                        if not any(_is_deprecated(_k) or _is_excluded(_k) for _k in keywords):
+                            argument.annotation = real_type_annotation
+
+                            if (alias_name := _get_alias_name(keywords)) is not None:
+                                argument.arg = alias_name
+                        else:
+                            _remove_argument(arg_idx)
+                            continue
+                        pass
                     case _:
                         _remove_argument(arg_idx)
                         continue

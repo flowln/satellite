@@ -379,6 +379,41 @@ class TestWithSingleEnvironment:
         assert history.name == item.name
         assert history.exit_status == "completed"
 
+    async def test_queue_execute(self, client: httpx.AsyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+
+        old_status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
+        old_queue_uid = old_status.plan_queue_uid
+        old_history_uid = old_status.plan_history_uid
+
+        ret = assert_response(await client.post("/queue/item/execute", json=request_body)).json()
+        assert ret["item"]["item_uid"] is not None
+        assert ret["item"]["execute_method"] == "execute"
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+        assert ManagerStatus.model_validate(response.json()).plan_queue_uid == old_queue_uid
+
+        async def wait_history_change():
+            while True:
+                _status = await client.get("/queue/status")
+                model = ManagerStatus.model_validate(_status.json())
+                if model.plan_history_uid != old_history_uid and model.items_in_history == 1:
+                    break
+
+                await asyncio.sleep(0.05)
+
+        await wait_status_change(client, wait_history_change())
+
+        response = await client.get("/queue/history/get")
+        assert response.status_code == 200
+        assert len(response.json()["items"]) == 1, response.json()
+
+        history = HistoryItem.model_validate(response.json()["items"][0])
+        assert history.name == item.name
+        assert history.exit_status == "completed"
+
     async def test_queue_run_in_sequence(self, client: httpx.AsyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
         request_body = {"item": item.model_dump(mode="json")}

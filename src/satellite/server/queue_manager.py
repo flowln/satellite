@@ -155,7 +155,7 @@ class QueueManager:
 
         return self._router
 
-    async def _check_for_enqueued_message(self, force_update_status: bool) -> Any:
+    async def _check_for_enqueued_message(self, force_update_status: bool, *, bypass: bool = False) -> Any:
         """
         Retrieve a new message from the environment, if available.
 
@@ -164,6 +164,8 @@ class QueueManager:
         force_update_status : bool
             If True, change the manager state uid and modification time even when
             the actual state remains the same.
+        bypass : bool, optional
+            If True, return the enqueued message without going through the default handlers.
 
         Returns
         -------
@@ -183,6 +185,10 @@ class QueueManager:
         return_value = enqueued_message
 
         self._logger.debug("Received new message from environment: %s", str(enqueued_message))
+
+        if bypass:
+            return return_value
+
         match enqueued_message:
             case CloseEnvironmentResult(_uuid):
                 pass
@@ -223,7 +229,14 @@ class QueueManager:
                 self._status.plan_history_uid = create_uuid()
                 self._status.items_in_history += 1
 
-                if self._status.queue_stop_pending or self._status.items_in_queue == 0 or stop_queue:
+                stop_execution = (
+                    self._status.queue_stop_pending
+                    or self._status.items_in_queue == 0
+                    or stop_queue
+                    or item.execute_method == "execute"
+                )
+
+                if stop_execution:
                     self._status.queue_stop_pending = False
 
                     await self._status.update_manager_state("idle", force=force_update_status)
@@ -306,7 +319,7 @@ class QueueManager:
         while (await self._check_for_enqueued_message(force_update_status)) is not None:
             pass
 
-    async def _ask_environment(self, req_class: type, rsp_class: type, *args, **kwargs) -> Any:
+    async def _ask_environment(self, req_class: type, rsp_class: type, *args, bypass: bool = False, **kwargs) -> Any:
         """
         Ask the environment for something, and wait for it to respond.
 
@@ -318,6 +331,8 @@ class QueueManager:
             Type of the response expected from the environment
         *args : Sequence[typing.Any]
             Arguments to construct the request object with.
+        bypass : bool, optional
+            If True, bypass the default response handlers.
         **kwargs : dict[str, typing.Any]
             Keyword arguments to construct the request object with.
 
@@ -343,7 +358,7 @@ class QueueManager:
 
         _initial_time = time.time()
         while time.time() - _initial_time <= 5.0:
-            return_value = await self._check_for_enqueued_message(False)
+            return_value = await self._check_for_enqueued_message(False, bypass=bypass)
 
             if return_value is not None and isinstance(return_value, rsp_class) and return_value.uuid == message_uuid:
                 response = return_value
@@ -1332,6 +1347,73 @@ class QueueManager:
             ret.items.append(item_response.item)
 
         ret.queue_size = self._status.items_in_queue
+        return ret
+
+    @post_endpoint("/queue/item/execute")
+    async def execute_item(
+        self,
+        item: Annotated[QueueItem, Body(embed=True)],
+        user: Annotated[str, Security(get_current_user, scopes=["write:manager:control"])] = "default",
+        user_group: Annotated[str, Security(get_current_user_group)] = "primary",
+        lock_key: str | None = None,
+    ) -> QueueAddRemoveResponse:
+        """
+        Immediately execute an item, bypassing the queue current state and options.
+
+        Parameters
+        ----------
+        item : QueueItem
+            The item to execute immediately.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = QueueAddRemoveResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        await self.check_environment_process()
+
+        if not self._status.worker_environment_exists:
+            ret.success = False
+            ret.msg = "Failed to execute item: No execution environment exists."
+            return ret
+
+        if self._status.manager_state != "idle":
+            ret.success = False
+            ret.msg = "Failed to execute item: Manager is not in the 'idle' state."
+            return ret
+
+        ret = await self._validate_queue_item(ret, item, user_group=user_group)
+        if not ret.success:
+            return ret
+
+        item.execute_method = "execute"
+
+        item.last_modification_user = user
+        item.last_modification_user_group = user_group
+
+        if item.uid is None:
+            item.uid = create_uuid()
+
+        env_return = await self._ask_environment(RunProvidedItem, RunProvidedItemResponse, item, bypass=True)
+        if env_return is None:
+            ret.success = False
+            ret.msg = "Failed to execute item: Failed to submit item for execution."
+
+        self._status.running_item_uid = item.uid
+
+        ret.queue_size = self._status.items_in_queue
+        ret.item = item
+
         return ret
 
     @post_endpoint("/queue/start", dependencies=[Security(get_current_user, scopes=["write:manager:control"])])

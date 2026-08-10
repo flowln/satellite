@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-09T18:33+00:00
-Git revision: 13d5651324970ed809517678684263424fdb7ef4
+Date: 2026-08-10T20:43+00:00
+Git revision: 3505a0e8de205b1a6410f53f829f7b3c247a6977
 """
 
 from abc import abstractmethod
@@ -594,6 +594,38 @@ class BaseAsyncClient(httpx.AsyncClient):
         response = await self.post_implementation("/queue/item/move/batch", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    async def queue_item_execute(self, item: QueueItem, lock_key: str | None = None) -> QueueAddRemoveResponse:
+        """
+        Immediately execute an item, bypassing the queue current state and options.
+
+        Parameters
+        ----------
+        item : QueueItem
+            The item to execute immediately.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"lock_key": None}
+        original_parameters = {"item": item, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/item/execute", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
     async def queue_start(self, lock_key: str | None = None) -> GenericResponse:
@@ -1455,6 +1487,38 @@ class BaseSyncClient:
         response = self.post_implementation("/queue/item/move/batch", **parameters)
         response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
+        return ret
+
+    def queue_item_execute(self, item: QueueItem, lock_key: str | None = None) -> QueueAddRemoveResponse:
+        """
+        Immediately execute an item, bypassing the queue current state and options.
+
+        Parameters
+        ----------
+        item : QueueItem
+            The item to execute immediately.
+        user : str, optional
+            The user making the request. Defaults to 'default'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        user_group : str, optional
+            The group associated with the user currently making the request. Defaults to 'primary'.
+
+            It is used for recording information in the item, so that it's easier to track later.
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"lock_key": None}
+        original_parameters = {"item": item, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/item/execute", **parameters)
+        response.raise_for_status()
+        ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
     def queue_start(self, lock_key: str | None = None) -> GenericResponse:

@@ -153,6 +153,21 @@ class TestWithSingleEnvironment:
         assert len(history.items) == 1
         assert history.items[0].name == "simple_plan"
 
+    def test_queue_item_execute(self, python_client: SyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        response = python_client.queue_item_execute(item)
+        assert response.success, response.msg
+        assert response.item is not None
+        assert response.item.execute_method == "execute"
+
+        python_client.wait_for_condition(lambda s: s.worker_environment_state == "running")
+        python_client.wait_for_idle()
+
+        history = python_client.history_get()
+        assert len(history.items) == 1
+        assert history.items[0].uid == response.item.uid
+        assert history.items[0].name == "simple_plan"
+
     def test_queue_add_remove_batch(self, python_client: SyncClient):
         item = QueueItem(name="simple_plan", args=["rand"])
 

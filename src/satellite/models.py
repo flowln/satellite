@@ -140,6 +140,9 @@ class QueueItem(BaseModel):
     type: Literal["plan", "instruction"] = Field(alias="item_type", default="plan")
     """Type of operation this item represents."""
 
+    execute_method: Literal["queue", "execute"] = Field(default="queue")
+    """Whether this item was directly executed, or ran as a normal queue submission."""
+
     name: str
     """
     Human-readable name of this item.

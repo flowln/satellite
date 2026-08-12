@@ -27,6 +27,7 @@ from ..models import (
     AllowedDevicesResponse,
     AllowedPlansResponse,
     ConsoleUidResponse,
+    ExecutionConfiguration,
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,
@@ -202,6 +203,10 @@ class QueueManager:
             case HealthCheckStatus(HealthStatus.Idle):
                 await self._status.update_manager_state("idle", force=force_update_status)
                 self._status.worker_environment_state = "idle"
+
+                # Trigger autostart if enabled
+                if self._status.execution_configuration.autostart_enabled and self._status.items_in_queue != 0:
+                    await self._enqueue_next_item_for_running()
             case HealthCheckStatus(HealthStatus.Running):
                 await self._status.update_manager_state("executing_queue", force=force_update_status)
                 self._status.worker_environment_state = "running"
@@ -226,14 +231,23 @@ class QueueManager:
 
                 await self._persistence_backend.history_insert_item(item, 0)
 
-                self._status.plan_history_uid = create_uuid()
                 self._status.items_in_history += 1
+                self._status.plan_history_uid = create_uuid()
+
+                if self._status.execution_configuration.loop_mode:
+                    await self._persistence_backend.queue_insert_item(item)
+
+                    self._status.items_in_queue += 1
+                    self._status.plan_queue_uid = create_uuid()
 
                 stop_execution = (
-                    self._status.queue_stop_pending
-                    or self._status.items_in_queue == 0
-                    or stop_queue
-                    or item.execute_method == "execute"
+                    self._status.queue_stop_pending  # User has asked for a stop
+                    or self._status.items_in_queue == 0  # No more items to run
+                    or stop_queue  # A 'queue_stop' instruction has ran
+                    or item.execute_method == "execute"  # Item was ran from a '/queue/execute' route
+                    or (
+                        not self._status.execution_configuration.ignore_errors and item.has_failed_execution()
+                    )  # The item has failed
                 )
 
                 if stop_execution:
@@ -465,7 +479,6 @@ class QueueManager:
             Ignore whether the manager is currently in the 'idle' state.
             This is used for enqueuing a new item just after a previous one has finished.
 
-
         Returns
         -------
         GenericResponse
@@ -507,6 +520,75 @@ class QueueManager:
         await self.check_environment_process()
 
         return self._status
+
+    @post_endpoint("/queue/mode/set")
+    async def set_queue_mode(
+        self,
+        mode: Annotated[ExecutionConfiguration | Literal["default"] | None, Body(embed=True)] = None,
+        loop: bool | None = None,
+        ignore_failures: bool | None = None,
+        autostart: bool | None = None,
+        lock_key: str | None = None,
+    ) -> GenericResponse:
+        """
+        Configure item execution behavior for queue items.
+
+        Parameters
+        ----------
+        mode : dict or "default", optional
+            The new item execution mode to configure. Either a dictionary with the individual configurations to set,
+            or a string "default" to return all configurations to their default values.
+        loop : bool, optional
+            The loop mode to configure. Activating this mode means that recently executed items get added back to the
+            end of the queue, and execution continues from there according to the auto-start mode.
+        ignore_failures : bool, optional
+            Whether to continue queue execution after an item has failed (or aborted or halted) its execution.
+        autostart : bool, optional
+            If enabled, start item execution whenever possible (i.e. there's at least one item on the queue, the
+            environment is ready for execution, and the previous item didn't stop the queue execution somehow).
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        ret = GenericResponse()
+
+        if lock_key is not None:
+            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
+
+        if mode is not None:
+            if mode == "default":
+                self._status.execution_configuration = ExecutionConfiguration()
+            else:
+                self._status.execution_configuration = mode
+        else:
+            if loop is not None:
+                self._status.execution_configuration.loop_mode = loop
+            if ignore_failures is not None:
+                self._status.execution_configuration.ignore_errors = ignore_failures
+            if autostart is not None:
+                self._status.execution_configuration.autostart_enabled = autostart
+
+        await self._status.update_manager_state(self._status.manager_state, force=True)
+
+        # Trigger autostart if enabled
+        if self._status.execution_configuration.autostart_enabled and self._status.items_in_queue != 0:
+            await self._enqueue_next_item_for_running()
+
+        return ret
+
+    @post_endpoint("/queue/autostart")
+    async def set_queue_autostart(self, enable: bool, lock_key: str | None = None) -> GenericResponse:
+        """
+        Configure auto-start item execution behavior for queue items.
+
+        Parameters
+        ----------
+        enable : bool
+            If enabled, start item execution whenever possible (i.e. there's at least one item on the queue, the
+            environment is ready for execution, and the previous item didn't stop the queue execution somehow).
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        return await self.set_queue_mode(auto_start=enable, lock_key=lock_key)
 
     def _accept_environment_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Callback for a `asyncio.Server` instance when creating a new connection."""
@@ -909,6 +991,10 @@ class QueueManager:
         ret.item = item
 
         await self.check_environment_process(force_update_status=True)
+
+        # Trigger autostart if enabled
+        if self._status.worker_environment_exists and self._status.execution_configuration.autostart_enabled:
+            await self._enqueue_next_item_for_running()
 
         return ret
 

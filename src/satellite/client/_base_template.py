@@ -42,6 +42,7 @@ from satellite.models import (
     AllowedDevicesResponse,
     AllowedPlansResponse,
     ConsoleUidResponse,
+    ExecutionConfiguration,
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,

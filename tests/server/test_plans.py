@@ -111,6 +111,8 @@ class TestPlanExecution:
         (await client.post("/queue/queue/clear")).raise_for_status()
         (await client.post("/queue/history/clear")).raise_for_status()
 
+        (await client.post("/queue/mode/set", json={"mode": "default"})).raise_for_status()
+
     async def test_failing_plan(self, client: httpx.AsyncClient):
         item = QueueItem(name="failing_plan")
         request_body = {"item": item.model_dump(mode="json")}
@@ -241,3 +243,128 @@ class TestPlanExecution:
         assert_response(await client.post("/queue/queue/start"))
 
         await wait_status_change(client, wait_history_change(7))
+
+    async def test_queue_run_loop_mode(self, client: httpx.AsyncClient):
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+        assert_response(await client.post("/queue/item/add", json=request_body))
+
+        assert_response(await client.post("/queue/mode/set", json={"mode": {"loop": True}}))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+
+        status = ManagerStatus.model_validate(response.json())
+        assert status.execution_configuration.loop_mode
+        assert not status.execution_configuration.ignore_errors
+        assert not status.execution_configuration.autostart_enabled
+
+        assert_response(await client.post("/queue/start"))
+
+        async def wait_history_change(remaining_items: int):
+            while True:
+                _status = (await client.get("/queue/status")).json()
+                model = ManagerStatus.model_validate(_status)
+
+                assert model.worker_environment_exists
+
+                if model.items_in_history == remaining_items:
+                    break
+
+                await asyncio.sleep(0.05)
+
+        await wait_status_change(client, wait_history_change(2))
+
+        assert_response(await client.post("/queue/stop"))
+
+        await wait_status_change(client, wait_history_change(3))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+
+        status = ManagerStatus.model_validate(response.json())
+        assert status.items_in_queue == 1
+
+    async def test_queue_run_ignore_failures(self, client: httpx.AsyncClient):
+        item = QueueItem(name="failing_plan")
+        request_body = {"items": [item.model_dump(mode="json")] * 3}
+        assert_response(await client.post("/queue/item/add/batch", json=request_body))
+
+        assert_response(await client.post("/queue/mode/set", json={"mode": {"ignore_failures": False}}))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+        status = ManagerStatus.model_validate(response.json())
+        assert status.items_in_queue == 3
+        assert status.items_in_history == 0
+        assert not status.execution_configuration.loop_mode
+        assert not status.execution_configuration.ignore_errors
+        assert not status.execution_configuration.autostart_enabled
+
+        assert_response(await client.post("/queue/start"))
+
+        async def wait_history_change(remaining_items: int):
+            while True:
+                _status = (await client.get("/queue/status")).json()
+                model = ManagerStatus.model_validate(_status)
+
+                assert model.worker_environment_exists
+
+                if model.items_in_history == remaining_items:
+                    break
+
+                await asyncio.sleep(0.05)
+
+        await wait_status_change(client, wait_history_change(1))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+        status = ManagerStatus.model_validate(response.json())
+        assert status.items_in_queue == 2
+
+        assert_response(await client.post("/queue/mode/set", json={"mode": {"ignore_failures": True}}))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+        status = ManagerStatus.model_validate(response.json())
+        assert not status.execution_configuration.loop_mode
+        assert status.execution_configuration.ignore_errors
+        assert not status.execution_configuration.autostart_enabled
+
+        assert_response(await client.post("/queue/start"))
+
+        await wait_status_change(client, wait_history_change(3))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+        status = ManagerStatus.model_validate(response.json())
+        assert status.items_in_queue == 0
+
+    async def test_queue_run_autostart(self, client: httpx.AsyncClient):
+        assert_response(await client.post("/queue/mode/set", json={"mode": {"autostart": True}}))
+
+        response = await client.get("/queue/status")
+        assert response.status_code == 200
+
+        status = ManagerStatus.model_validate(response.json())
+        assert not status.execution_configuration.loop_mode
+        assert not status.execution_configuration.ignore_errors
+        assert status.execution_configuration.autostart_enabled
+
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+        assert_response(await client.post("/queue/item/add", json=request_body))
+
+        async def wait_history_change(remaining_items: int):
+            while True:
+                _status = (await client.get("/queue/status")).json()
+                model = ManagerStatus.model_validate(_status)
+
+                assert model.worker_environment_exists
+
+                if model.items_in_history == remaining_items:
+                    break
+
+                await asyncio.sleep(0.05)
+
+        await wait_status_change(client, wait_history_change(1))

@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-10T20:43+00:00
-Git revision: 3505a0e8de205b1a6410f53f829f7b3c247a6977
+Date: 2026-08-12T22:37+00:00
+Git revision: 7e6c196dd1c5d02d3c0dfec3d49ef8c4daad2a75
 """
 
 from abc import abstractmethod
@@ -21,6 +21,7 @@ from satellite.models import (
     AllowedDevicesResponse,
     AllowedPlansResponse,
     ConsoleUidResponse,
+    ExecutionConfiguration,
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,
@@ -85,6 +86,77 @@ class BaseAsyncClient(httpx.AsyncClient):
         response = await self.get_implementation("/status", **parameters)
         response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
+        return ret
+
+    async def queue_mode_set(
+        self,
+        mode: ExecutionConfiguration | Literal["default"] | None = None,
+        loop: bool | None = None,
+        ignore_failures: bool | None = None,
+        autostart: bool | None = None,
+        lock_key: str | None = None,
+    ) -> GenericResponse:
+        """
+        Configure item execution behavior for queue items.
+
+        Parameters
+        ----------
+        mode : dict or "default", optional
+            The new item execution mode to configure. Either a dictionary with the individual configurations to set,
+            or a string "default" to return all configurations to their default values.
+        loop : bool, optional
+            The loop mode to configure. Activating this mode means that recently executed items get added back to the
+            end of the queue, and execution continues from there according to the auto-start mode.
+        ignore_failures : bool, optional
+            Whether to continue queue execution after an item has failed (or aborted or halted) its execution.
+        autostart : bool, optional
+            If enabled, start item execution whenever possible (i.e. there's at least one item on the queue, the
+            environment is ready for execution, and the previous item didn't stop the queue execution somehow).
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None, "lock_key": None}
+        original_parameters = {
+            "mode": mode,
+            "loop": loop,
+            "ignore_failures": ignore_failures,
+            "autostart": autostart,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/mode/set", **parameters)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
+
+    async def queue_autostart(self, enable: bool, lock_key: str | None = None) -> GenericResponse:
+        """
+        Configure auto-start item execution behavior for queue items.
+
+        Parameters
+        ----------
+        enable : bool
+            If enabled, start item execution whenever possible (i.e. there's at least one item on the queue, the
+            environment is ready for execution, and the previous item didn't stop the queue execution somehow).
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"lock_key": None}
+        original_parameters = {"enable": enable, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/queue/autostart", **parameters)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
         return ret
 
     async def environment_open(self, lock_key: str | None = None) -> GenericResponse:
@@ -978,6 +1050,77 @@ class BaseSyncClient:
         response = self.get_implementation("/status", **parameters)
         response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
+        return ret
+
+    def queue_mode_set(
+        self,
+        mode: ExecutionConfiguration | Literal["default"] | None = None,
+        loop: bool | None = None,
+        ignore_failures: bool | None = None,
+        autostart: bool | None = None,
+        lock_key: str | None = None,
+    ) -> GenericResponse:
+        """
+        Configure item execution behavior for queue items.
+
+        Parameters
+        ----------
+        mode : dict or "default", optional
+            The new item execution mode to configure. Either a dictionary with the individual configurations to set,
+            or a string "default" to return all configurations to their default values.
+        loop : bool, optional
+            The loop mode to configure. Activating this mode means that recently executed items get added back to the
+            end of the queue, and execution continues from there according to the auto-start mode.
+        ignore_failures : bool, optional
+            Whether to continue queue execution after an item has failed (or aborted or halted) its execution.
+        autostart : bool, optional
+            If enabled, start item execution whenever possible (i.e. there's at least one item on the queue, the
+            environment is ready for execution, and the previous item didn't stop the queue execution somehow).
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None, "lock_key": None}
+        original_parameters = {
+            "mode": mode,
+            "loop": loop,
+            "ignore_failures": ignore_failures,
+            "autostart": autostart,
+            "lock_key": lock_key,
+        }
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/mode/set", **parameters)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
+        return ret
+
+    def queue_autostart(self, enable: bool, lock_key: str | None = None) -> GenericResponse:
+        """
+        Configure auto-start item execution behavior for queue items.
+
+        Parameters
+        ----------
+        enable : bool
+            If enabled, start item execution whenever possible (i.e. there's at least one item on the queue, the
+            environment is ready for execution, and the previous item didn't stop the queue execution somehow).
+        lock_key : str, optional
+            The lock key currently being used.
+        """
+        default_values = {"lock_key": None}
+        original_parameters = {"enable": enable, "lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/queue/autostart", **parameters)
+        response.raise_for_status()
+        ret = GenericResponse.model_validate(response.json())
         return ret
 
     def environment_open(self, lock_key: str | None = None) -> GenericResponse:

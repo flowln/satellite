@@ -28,9 +28,9 @@ These are the missing features in relation to the original implementations, that
 - [X] Console API
 - [ ] Task support
 - [X] Instructions support
-- [ ] Loop mode
+- [X] Loop mode
 - [X] Batch endpoints
-- [ ] Queue autostart
+- [X] Queue autostart
 - [ ] Permanent metadata
 
 The following are features not present in the current implementation, and that for now are not being considered for development:

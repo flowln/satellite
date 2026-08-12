@@ -59,6 +59,19 @@ class UserInformation(BaseModel):
 type ManagerState = Literal["idle", "creating_environment", "closing_environment", "executing_queue", "paused"]
 
 
+class ExecutionConfiguration(BaseModel):
+    """Configuration options for executing items from the queue."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
+
+    loop_mode: bool = Field(alias="loop", default=False)
+    """Add executed items to the back of the queue automatically."""
+    ignore_errors: bool = Field(alias="ignore_failures", default=False)
+    """Ignore the exit status of an item when checking whether to proceed execution to the next item in the queue."""
+    autostart_enabled: bool = Field(alias="autostart", default=False)
+    """Start execution whenever possible (i.e. the queue is not empty and the environment is ready to execute it)."""
+
+
 class ManagerStatus(BaseModel):
     """Return result of a call to the '/status' endpoint."""
 
@@ -100,10 +113,10 @@ class ManagerStatus(BaseModel):
     )
     worker_background_tasks: int = 0
 
-    plan_queue_mode: dict = {}
+    execution_configuration: ExecutionConfiguration = Field(alias="plan_queue_mode", default=ExecutionConfiguration())
+    """Configuration options for executing items from the queue."""
 
     queue_stop_pending: bool = False
-    queue_autostart_enabled: bool = False
     pause_pending: bool = False
 
     worker_environment_exists: bool = False
@@ -113,6 +126,22 @@ class ManagerStatus(BaseModel):
 
     lock_info_uid: UUID = create_uuid()
     lock: dict = {}
+
+    @computed_field
+    @property
+    def queue_autostart_enabled(self) -> bool:
+        """Start execution whenever possible (i.e. the queue is not empty and the environment is ready to execute)."""
+        # NOTE: This field only exists for bluesky-queueserver compatibility.
+
+        # The following is the warning that would be generated if Pydantic didn't raise it
+        # every time the status is serialized (annoying).
+
+        # warnings.warn(
+        #     "This field is deprecated. Use the respective field in the 'execution_configuration' field instead.",
+        #     stacklevel=2,
+        # )
+
+        return self.execution_configuration.autostart_enabled
 
     @computed_field
     @property
@@ -199,6 +228,10 @@ class HistoryItem(QueueItem):
     def from_queue_item(cls, queue_item: QueueItem):
         """Create a matching HistoryItem from a previous QueueItem."""
         return HistoryItem(**queue_item.model_dump(by_alias=True))
+
+    def has_failed_execution(self) -> bool:
+        """Return whether the execution represents some kind of error (True), or success (False)."""
+        return self.exit_status in {"failed", "aborted", "halted"}
 
 
 class GenericResponse(BaseModel):

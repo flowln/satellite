@@ -258,7 +258,7 @@ def _create_password_login_handler(
         )
 
         return SuccessfulLoginResponse(
-            token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
+            access_token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
         )
 
     # FIXME: Have one for this provider and a global one that redirects
@@ -343,7 +343,7 @@ def _create_password_login_handler(
             override_refresh_expiration_time,
         )
         return SuccessfulLoginResponse(
-            token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
+            access_token=token, refresh_token=refresh_token, expires_in=token_expires_in, token_type="bearer"
         )
 
     return router

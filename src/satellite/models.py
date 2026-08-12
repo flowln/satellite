@@ -20,11 +20,11 @@ def create_uuid() -> UUID:
 
 
 class SuccessfulLoginResponse(BaseModel):
-    """Response of a successful 'login' request."""
+    """Response of a successful 'login' request. Based on RFC 6749 - https://datatracker.ietf.org/doc/html/rfc6749#section-5.1"""
 
     model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
 
-    token: str
+    token: str = Field(alias="access_token")
     """JWT Token asserting the user's permission to access resources."""
 
     refresh_token: str

@@ -10,21 +10,26 @@ striving to be compatible with it wherever it makes sense to.
 
 These are the missing features in relation to the original implementations, that are currently targeted for development in the near future:
 
-- [ ] Authentication / Authorization
+- [X] Authentication / Authorization
+  - Currently, the basic infrastructure for both of them is implemented. All authorization modes that `bluesky-httpserver` supports are also fully added.
+    However, not all authentication providers are implemented, and perhaps that is better left for a common repository reusable by various projects,
+    as some in the community have argued for. So, for now, authentication support might be added on a necessity basis.
+  - Additionally, the current implementation is entirely agnostic to multiple queues. Perhaps a better approach for the future is to have system-wide
+    authentication, but queue-wide authorization methods. How well that'd work will depend on user feedback most likely.
 - [ ] Support for QueueServer's annotation decorator
 - [X] Load queue / history state at startup
 - [ ] Python library / Command-line interface
   - [X] Python library (Sync and Async versions)
-  - [ ] Command-line utility
+  - [ ] Command-line utility (TODO: Investigate usefulness. Maybe this can be targeted as a devops support tool, not an end-user utility)
 - [ ] Lock key support
-- [ ] ZMQ endpoints
-- [ ] HTTP API configuration
+- [ ] ZMQ endpoints (TODO: Validate whether this makes sense to add, or is too big a burden for too little usage, I have no idea who uses it directly)
+- [ ] HTTP API configuration (i.e. HTTPS support and configure 200 error responses with `success=False` or 4XX responses)
 - [ ] WebSocket endpoints
 - [X] Console API
 - [ ] Task support
 - [X] Instructions support
 - [ ] Loop mode
-- [ ] Batch endpoints
+- [X] Batch endpoints
 - [ ] Queue autostart
 - [ ] Permanent metadata
 

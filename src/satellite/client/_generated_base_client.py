@@ -5,13 +5,14 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-12T22:37+00:00
-Git revision: 7e6c196dd1c5d02d3c0dfec3d49ef8c4daad2a75
+Date: 2026-08-13T20:56+00:00
+Git revision: 25fc8eaa14f9f5fb8d7aaefa339b7386a8ba52c6
 """
 
 from abc import abstractmethod
 import asyncio
 from collections.abc import Coroutine
+import logging
 from typing import Any, Literal
 from uuid import UUID
 
@@ -34,6 +35,8 @@ from satellite.models import (
     SuccessfulLoginResponse,
     UserInformation,
 )
+
+logger = logging.getLogger("satellite.client")
 
 
 class BaseAsyncClient(httpx.AsyncClient):
@@ -76,7 +79,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Test connectivity with the queue manager. Always responds 'pong'."""
         parameters = {}
         response = await self.get_implementation("/ping", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = response.json()
         return ret
 
@@ -84,7 +89,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve the current state of the manager."""
         parameters = {}
         response = await self.get_implementation("/status", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
         return ret
 
@@ -130,7 +137,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/mode/set", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -155,7 +164,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/autostart", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -178,7 +189,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/environment/open", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -201,7 +214,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/environment/close", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -227,7 +242,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/environment/destroy", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -254,7 +271,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/history/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
@@ -262,7 +281,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Clear the history of previously ran plans."""
         parameters = {}
         response = await self.post_implementation("/history/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -270,7 +291,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve a list of all items currently in the queue."""
         parameters = {}
         response = await self.get_implementation("/queue/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
 
@@ -292,7 +315,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -357,7 +382,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/add", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -422,7 +449,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/add/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -460,7 +489,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/remove", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -490,7 +521,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/remove/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -529,7 +562,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -605,7 +640,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/move", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -664,7 +701,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/move/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -696,7 +735,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/execute", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -718,7 +759,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/start", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -743,7 +786,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -768,7 +813,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/stop/cancel", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -800,7 +847,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/re/pause", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -822,7 +871,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/re/resume", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -844,7 +895,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/re/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -866,7 +919,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/re/abort", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -888,7 +943,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/re/halt", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -916,7 +973,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/re/runs", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
@@ -938,7 +997,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/console_output", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -962,7 +1023,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/console_output_update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -975,7 +1038,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """
         parameters = {}
         response = await self.get_implementation("/console_output/uid", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
         return ret
 
@@ -983,7 +1048,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve a list of allowed plans for the current user."""
         parameters = {}
         response = await self.get_implementation("/plans/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedPlansResponse.model_validate(response.json())
         return ret
 
@@ -991,7 +1058,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve a list of allowed devices for the current user."""
         parameters = {}
         response = await self.get_implementation("/devices/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedDevicesResponse.model_validate(response.json())
         return ret
 
@@ -1040,7 +1109,9 @@ class BaseSyncClient:
         """Test connectivity with the queue manager. Always responds 'pong'."""
         parameters = {}
         response = self.get_implementation("/ping", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = response.json()
         return ret
 
@@ -1048,7 +1119,9 @@ class BaseSyncClient:
         """Retrieve the current state of the manager."""
         parameters = {}
         response = self.get_implementation("/status", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
         return ret
 
@@ -1094,7 +1167,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/mode/set", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1119,7 +1194,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/autostart", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1142,7 +1219,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/environment/open", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1165,7 +1244,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/environment/close", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1191,7 +1272,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/environment/destroy", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1218,7 +1301,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/history/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
@@ -1226,7 +1311,9 @@ class BaseSyncClient:
         """Clear the history of previously ran plans."""
         parameters = {}
         response = self.post_implementation("/history/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1234,7 +1321,9 @@ class BaseSyncClient:
         """Retrieve a list of all items currently in the queue."""
         parameters = {}
         response = self.get_implementation("/queue/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
 
@@ -1256,7 +1345,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1321,7 +1412,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/add", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1386,7 +1479,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/add/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -1424,7 +1519,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/remove", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1454,7 +1551,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/remove/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -1493,7 +1592,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1569,7 +1670,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/move", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1628,7 +1731,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/move/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -1660,7 +1765,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/execute", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1682,7 +1789,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/start", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1707,7 +1816,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1732,7 +1843,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/stop/cancel", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1764,7 +1877,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/re/pause", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1786,7 +1901,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/re/resume", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1808,7 +1925,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/re/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1830,7 +1949,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/re/abort", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1852,7 +1973,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/re/halt", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1880,7 +2003,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/re/runs", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
@@ -1902,7 +2027,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/console_output", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -1926,7 +2053,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/console_output_update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -1939,7 +2068,9 @@ class BaseSyncClient:
         """
         parameters = {}
         response = self.get_implementation("/console_output/uid", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
         return ret
 
@@ -1947,7 +2078,9 @@ class BaseSyncClient:
         """Retrieve a list of allowed plans for the current user."""
         parameters = {}
         response = self.get_implementation("/plans/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedPlansResponse.model_validate(response.json())
         return ret
 
@@ -1955,6 +2088,8 @@ class BaseSyncClient:
         """Retrieve a list of allowed devices for the current user."""
         parameters = {}
         response = self.get_implementation("/devices/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedDevicesResponse.model_validate(response.json())
         return ret

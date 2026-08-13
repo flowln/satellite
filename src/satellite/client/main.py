@@ -11,7 +11,9 @@ import click
 _GET_ASYNC_CODE = Template("""
 $get_parameters_expr
 response = await self.get_implementation(\"$endpoint\", **parameters)
-response.raise_for_status()
+if response.status_code != 200:
+    logger.error("Request has failed: %s", response.json())
+    response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
@@ -19,7 +21,9 @@ return ret
 _POST_ASYNC_CODE = Template("""
 $get_parameters_expr
 response = await self.post_implementation(\"$endpoint\", **parameters)
-response.raise_for_status()
+if response.status_code != 200:
+    logger.error("Request has failed: %s", response.json())
+    response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
@@ -27,7 +31,9 @@ return ret
 _GET_SYNC_CODE = Template("""
 $get_parameters_expr
 response = self.get_implementation(\"$endpoint\", **parameters)
-response.raise_for_status()
+if response.status_code != 200:
+    logger.error("Request has failed: %s", response.json())
+    response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)
@@ -35,7 +41,9 @@ return ret
 _POST_SYNC_CODE = Template("""
 $get_parameters_expr
 response = self.post_implementation(\"$endpoint\", **parameters)
-response.raise_for_status()
+if response.status_code != 200:
+    logger.error("Request has failed: %s", response.json())
+    response.raise_for_status()
 ret = $return_type_conversion(response.json())
 return ret
 """)

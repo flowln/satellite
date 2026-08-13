@@ -44,7 +44,7 @@ def ping_client_process_code(server_port: int):
         loop.close()
 
 
-@pytest.fixture()
+@pytest.fixture
 def client():
     loop = asyncio.new_event_loop()
 
@@ -89,7 +89,6 @@ def client():
         client_proc.join(2.0)
         client_proc.close()
 
-        _pair.close()
         server.close()
         loop.close()
 
@@ -108,3 +107,5 @@ async def test_simple_exchange(client: IPCCommunicationPair, sent_message):
     recv_message = await client.read_message(timeout=2.0)
 
     assert recv_message == sent_message
+
+    await client.close()

@@ -173,8 +173,13 @@ class IPCCommunicationPair:
         self._writer.write(cast(bytes, _raw_data) + b"\n")
         await self._writer.drain()
 
-    def close(self):
+    async def close(self):
         """Close the streams associated with this object."""
         self._reader.feed_eof()
-        if self._writer.can_write_eof():
-            self._writer.write_eof()
+
+        try:
+            await self._writer.drain()
+        except ConnectionResetError:
+            pass
+
+        self._writer.close()

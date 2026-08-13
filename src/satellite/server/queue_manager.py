@@ -327,7 +327,7 @@ class QueueManager:
             self._environment_process_handle = None
 
             if self._environment_conn is not None:
-                self._environment_conn.close()
+                await self._environment_conn.close()
                 self._environment_conn = None
 
         while (await self._check_for_enqueued_message(force_update_status)) is not None:
@@ -600,7 +600,8 @@ class QueueManager:
         if self._environment_conn is not None:
             self._logger.error("Creating a new socket connection while there's already an existing one.")
 
-            self._environment_conn.close()
+            raise RuntimeError
+
         self._environment_conn = IPCCommunicationPair(reader, writer, loop=self._environment_conn_server[0])
 
     async def _wait_for_environment_connection(self, timeout: float = 5.0):

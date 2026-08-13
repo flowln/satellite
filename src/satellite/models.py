@@ -72,6 +72,66 @@ class ExecutionConfiguration(BaseModel):
     """Start execution whenever possible (i.e. the queue is not empty and the environment is ready to execute it)."""
 
 
+class LockInformation(BaseModel):
+    """Information on the state of a locked manager."""
+
+    lock_key: str | None = Field(default=None, exclude=True)
+    """The lock key associated with this information, if any."""
+    emergency_lock_key: str = Field(default="emergency!", exclude=True)
+    """The emergency lock key, used as a master key in case the original lock key is lost."""
+
+    is_environment_locked: bool = Field(alias="environment", default=False)
+    """Whether environment management endpoints are locked."""
+    is_queue_locked: bool = Field(alias="queue", default=False)
+    """Whether queue operation endpoints are locked."""
+
+    user: str = Field(default="unauthenticated_public")
+    """The user who requested the lock current lock."""
+
+    note: str | None = Field(default=None)
+    """A note the user who locked the manager left for other users."""
+
+    lock_timestamp: dt.datetime = Field(alias="time", default_factory=lambda _: dt.datetime.now())
+    """The timestamp when the lock was created."""
+
+    def is_locked_for_endpoint(self, endpoint: str) -> bool:
+        """Return whether the provided endpoint path is locked by the current locking state."""
+        if self.is_environment_locked:
+            return endpoint.endswith(
+                (
+                    "/environment/open",
+                    "/environment/close",
+                    "/environment/destroy",
+                    "/queue/start",
+                    "/queue/stop",
+                    "/queue/stop/cancel",
+                    "/queue/item/execute",
+                    "/re/pause",
+                    "/re/resume",
+                    "/re/stop",
+                    "/re/abort",
+                    "/re/halt",
+                )
+            )
+        if self.is_queue_locked:
+            return endpoint.endswith(
+                (
+                    "/queue/mode/set",
+                    "/queue/autostart",
+                    "/queue/item/add",
+                    "/queue/item/add/batch",
+                    "/queue/item/update",
+                    "/queue/item/remove",
+                    "/queue/item/remove/batch",
+                    "/queue/item/move",
+                    "/queue/item/move/batch",
+                    "/queue/clear",
+                    "/history/clear",
+                )
+            )
+        return False
+
+
 class ManagerStatus(BaseModel):
     """Return result of a call to the '/status' endpoint."""
 
@@ -125,7 +185,7 @@ class ManagerStatus(BaseModel):
     ip_kernel_captured: bool | None = None
 
     lock_info_uid: UUID = create_uuid()
-    lock: dict = {}
+    lock_info: LockInformation = Field(default=LockInformation())
 
     @computed_field
     @property
@@ -244,6 +304,14 @@ class GenericResponse(BaseModel):
 
     msg: str = ""
     """Error message in case of failure. If 'success' = True, this doesn't mean anything."""
+
+
+class LockResponse(GenericResponse):
+    """Data returned by the '/lock' API endpoint."""
+
+    lock_info_uid: UUID
+
+    lock_info: LockInformation = Field(default=LockInformation())
 
 
 class QueueResponse(GenericResponse):

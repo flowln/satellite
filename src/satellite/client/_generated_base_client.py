@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-13T20:56+00:00
-Git revision: 25fc8eaa14f9f5fb8d7aaefa339b7386a8ba52c6
+Date: 2026-08-13T21:04+00:00
+Git revision: dc1e1e6ace8e579b7266769d9535dd2334aed6d4
 """
 
 from abc import abstractmethod
@@ -26,6 +26,7 @@ from satellite.models import (
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,
+    LockResponse,
     ManagerStatus,
     QueueAddRemoveBatchResponse,
     QueueAddRemoveResponse,
@@ -93,6 +94,64 @@ class BaseAsyncClient(httpx.AsyncClient):
             logger.error("Request has failed: %s", response.json())
             response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
+        return ret
+
+    async def lock(
+        self, lock_key: str, environment: bool = False, queue: bool = False, note: str | None = None
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        user : str, optional
+            The user who is locking the manager.
+        """
+        default_values = {"environment": False, "queue": False, "note": None}
+        original_parameters = {"lock_key": lock_key, "environment": environment, "queue": queue, "note": note}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/lock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
+        return ret
+
+    async def unlock(self, lock_key: str) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        """
+        default_values = {}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/unlock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
         return ret
 
     async def queue_mode_set(
@@ -1123,6 +1182,64 @@ class BaseSyncClient:
             logger.error("Request has failed: %s", response.json())
             response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
+        return ret
+
+    def lock(
+        self, lock_key: str, environment: bool = False, queue: bool = False, note: str | None = None
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        user : str, optional
+            The user who is locking the manager.
+        """
+        default_values = {"environment": False, "queue": False, "note": None}
+        original_parameters = {"lock_key": lock_key, "environment": environment, "queue": queue, "note": note}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/lock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
+        return ret
+
+    def unlock(self, lock_key: str) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        """
+        default_values = {}
+        original_parameters = {"lock_key": lock_key}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/unlock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
         return ret
 
     def queue_mode_set(

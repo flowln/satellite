@@ -11,6 +11,7 @@ API_SCOPES = {
     "read:history": "Read access to the queue's items in history.",
     "read:console": "Read access to the queue's console output.",
     "write:manager:control": "Access to manager controls, like changing the environment state.",
+    "write:manager:lock": "Access to lock / unlock capabilities on the manager.",
     "write:plan:control": "Access to controls of the running plan's execution.",
     "write:queue:edit": "Write access to edit the queued items.",
     "write:history:edit": "Write access to edit the items in the history.",

@@ -9,7 +9,7 @@ import time
 from typing import Annotated, Any, Literal, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter, Body, Query, Security
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Security, status
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -31,6 +31,8 @@ from ..models import (
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,
+    LockInformation,
+    LockResponse,
     ManagerStatus,
     QueueAddRemoveBatchResponse,
     QueueAddRemoveResponse,
@@ -151,6 +153,12 @@ class QueueManager:
             endpoint = partial(func, self)
             endpoint = update_wrapper(endpoint, func, assigned=("__doc__", "__name__", "__qualname__"))
             del endpoint.__wrapped__
+
+            extra_dependencies = [Depends(self._validate_lock_key)]
+            if "dependencies" in kwargs:
+                kwargs["dependencies"].extend(extra_dependencies)
+            else:
+                kwargs["dependencies"] = extra_dependencies
 
             getattr(self._router, method)(*args, **kwargs)(endpoint)
 
@@ -521,6 +529,107 @@ class QueueManager:
 
         return self._status
 
+    async def _validate_lock_key(self, request: Request, lock_key: str | None = None):
+        info = self._status.lock_info
+
+        if info.is_locked_for_endpoint(request.url.path):
+            if lock_key is not None and lock_key in {info.lock_key, info.emergency_lock_key}:
+                return
+
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"The manager is currently locked by user '{info.user}': {info.note}.",
+            )
+
+    @post_endpoint("/lock")
+    async def add_lock_for_manager_operations(
+        self,
+        lock_key: str,
+        lock_environment: Annotated[bool, Query(alias="environment")] = False,
+        lock_queue: Annotated[bool, Query(alias="queue")] = False,
+        note: str | None = None,
+        user: Annotated[str, Security(get_current_user, scopes=["write:manager:lock"])] = "default",
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        user : str, optional
+            The user who is locking the manager.
+        """
+        ret = LockResponse(lock_info_uid=self._status.lock_info_uid)
+
+        if lock_environment and self._status.lock_info.is_environment_locked:
+            ret.success = False
+            ret.msg = "Failed to lock environment: It is already locked."
+
+            return ret
+
+        if lock_queue and self._status.lock_info.is_queue_locked:
+            ret.success = False
+            ret.msg = "Failed to lock queue: It is already locked."
+
+            return ret
+
+        if not lock_environment and not lock_queue:
+            ret.success = False
+            ret.msg = "Failed to lock environment / queue: At least one of those must be specified."
+
+            return ret
+
+        lock_information = LockInformation(environment=lock_environment, queue=lock_queue, user=user, note=note)
+        lock_information.lock_key = lock_key
+
+        self._status.lock_info = lock_information
+        self._status.lock_info_uid = create_uuid()
+
+        await self._status.update_manager_state(state=self._status.manager_state, force=True)
+
+        ret.lock_info = self._status.lock_info
+        ret.lock_info_uid = self._status.lock_info_uid
+
+        return ret
+
+    @post_endpoint("/unlock", dependencies=[Security(get_current_user, scopes=["write:manager:lock"])])
+    async def remove_lock_for_manager_operations(
+        self,
+        lock_key: str,
+    ) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        """
+        ret = LockResponse(lock_info_uid=self._status.lock_info_uid)
+
+        if lock_key not in {self._status.lock_info.lock_key, self._status.lock_info.emergency_lock_key}:
+            ret.success = False
+            ret.msg = "Failed to unlock environment / queue: The provided lock key is not correct."
+
+            return ret
+
+        self._status.lock_info = LockInformation()  # Reset lock information
+        self._status.lock_info_uid = create_uuid()
+
+        await self._status.update_manager_state(state=self._status.manager_state, force=True)
+
+        ret.lock_info = self._status.lock_info
+        ret.lock_info_uid = self._status.lock_info_uid
+
+        return ret
+
     @post_endpoint("/queue/mode/set")
     async def set_queue_mode(
         self,
@@ -550,9 +659,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         if mode is not None:
             if mode == "default":
@@ -629,9 +735,6 @@ class QueueManager:
         """
         ret = GenericResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         if self._environment_process_handle is not None and self._environment_process_handle.poll() is None:
             ret.success = False
             ret.msg = "Could not open the environment, since it already exists."
@@ -689,9 +792,6 @@ class QueueManager:
         """
         ret = GenericResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         await self.check_environment_process()
 
         if self._environment_process_handle is None:
@@ -719,9 +819,6 @@ class QueueManager:
 
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         if self._environment_process_handle is None:
             ret.success = False
@@ -801,9 +898,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         await self._persistence_backend.queue_clear()
         self._status.items_in_queue = 0
@@ -958,9 +1052,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = QueueAddRemoveResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         if not ignore_validation:
             ret = await self._validate_queue_item(ret, item, user_group=user_group)
@@ -1117,9 +1208,6 @@ class QueueManager:
         """
         ret = QueueAddRemoveResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         # Remove from the queue at the correct position
         if pos is not None:
             match pos:
@@ -1163,7 +1251,10 @@ class QueueManager:
 
     @post_endpoint("/queue/item/remove/batch", dependencies=[Security(get_current_user, scopes=["write:queue:edit"])])
     async def queue_item_remove_in_batch(
-        self, uids: Annotated[list[UUID], Body(embed=True)], ignore_missing: bool = True, lock_key: str | None = None
+        self,
+        uids: Annotated[list[UUID], Body(embed=True)],
+        ignore_missing: bool = True,
+        lock_key: str | None = None,
     ) -> QueueAddRemoveBatchResponse:
         """
         Remove multiple items from the queue.
@@ -1230,9 +1321,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = QueueAddRemoveResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         if item.uid is None:
             ret.success = False
@@ -1315,9 +1403,6 @@ class QueueManager:
         """
         ret = QueueAddRemoveResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         try:
             original_index = await self._get_queue_position(position=original_position, uid=uid)
         except RuntimeError as exc:
@@ -1385,9 +1470,6 @@ class QueueManager:
         """
         ret = QueueAddRemoveBatchResponse()
         ret.items = []
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         original_uids: list[tuple[UUID, int | None]] = []
         try:
@@ -1464,9 +1546,6 @@ class QueueManager:
         """
         ret = QueueAddRemoveResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         await self.check_environment_process()
 
         if not self._status.worker_environment_exists:
@@ -1518,9 +1597,6 @@ class QueueManager:
         """
         ret = GenericResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         await self.check_environment_process()
 
         new_ret = await self._enqueue_next_item_for_running()
@@ -1546,9 +1622,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         await self.check_environment_process()
 
@@ -1584,9 +1657,6 @@ class QueueManager:
         """
         ret = GenericResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         await self.check_environment_process()
 
         if not self._status.queue_stop_pending:
@@ -1618,9 +1688,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         await self.check_environment_process()
 
@@ -1655,9 +1722,6 @@ class QueueManager:
         """
         ret = GenericResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         await self.check_environment_process()
 
         if self._status.worker_environment_state != "paused":
@@ -1688,9 +1752,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         await self.check_environment_process()
 
@@ -1723,9 +1784,6 @@ class QueueManager:
         """
         ret = GenericResponse()
 
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
-
         await self.check_environment_process()
 
         if self._status.worker_environment_state != "paused":
@@ -1756,9 +1814,6 @@ class QueueManager:
             The lock key currently being used.
         """
         ret = GenericResponse()
-
-        if lock_key is not None:
-            ret.msg = "A non-null 'lock_key' was supplied, but support for it is not yet implemented. Ignoring it."
 
         await self.check_environment_process()
 

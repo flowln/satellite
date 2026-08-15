@@ -96,8 +96,9 @@ class LockInformation(BaseModel):
 
     def is_locked_for_endpoint(self, endpoint: str) -> bool:
         """Return whether the provided endpoint path is locked by the current locking state."""
+        is_locked: bool = False
         if self.is_environment_locked:
-            return endpoint.endswith(
+            is_locked |= endpoint.endswith(
                 (
                     "/environment/open",
                     "/environment/close",
@@ -114,7 +115,7 @@ class LockInformation(BaseModel):
                 )
             )
         if self.is_queue_locked:
-            return endpoint.endswith(
+            is_locked |= endpoint.endswith(
                 (
                     "/queue/mode/set",
                     "/queue/autostart",
@@ -129,7 +130,7 @@ class LockInformation(BaseModel):
                     "/history/clear",
                 )
             )
-        return False
+        return is_locked
 
 
 class ManagerStatus(BaseModel):

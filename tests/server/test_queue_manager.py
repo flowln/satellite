@@ -596,6 +596,39 @@ class TestWithSingleEnvironment:
         response = await client.post("/queue/item/add", json=request_body)
         assert response.status_code == 200
 
+    async def test_emergency_lock_key(self, client: httpx.AsyncClient):
+        response = assert_response(
+            await client.post(
+                "/lock",
+                params={"lock_key": "1234", "environment": True, "queue": True, "note": "locked for testing reasons"},
+            )
+        )
+        parsed_response = LockResponse.model_validate(response.json())
+        assert parsed_response.lock_info.is_environment_locked
+        assert parsed_response.lock_info.is_queue_locked
+
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+
+        response = await client.post("/queue/item/add", json=request_body, params={"lock_key": "1234"})
+        assert response.status_code == 200
+
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 423
+
+        response = await client.post("/queue/start", params={"lock_key": "emergency_test_key"})
+        assert response.status_code == 200
+
+        await wait_status_change(client, wait_history_change(client, 1))
+
+        response = assert_response(await client.post("/unlock", params={"lock_key": "emergency_test_key"}))
+        parsed_response = LockResponse.model_validate(response.json())
+        assert not parsed_response.lock_info.is_environment_locked
+        assert not parsed_response.lock_info.is_queue_locked
+
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 200
+
 
 @pytest.fixture
 async def prepopulated_client(monkeypatch, data_path, sample_items, sample_history_items) -> httpx.AsyncClient:

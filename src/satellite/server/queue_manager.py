@@ -588,6 +588,8 @@ class QueueManager:
 
         lock_information = LockInformation(environment=lock_environment, queue=lock_queue, user=user, note=note)
         lock_information.lock_key = lock_key
+        if self._configuration.operation.emergency_key is not None:
+            lock_information.emergency_lock_key = self._configuration.operation.emergency_key
 
         self._status.lock_info = lock_information
         self._status.lock_info_uid = create_uuid()

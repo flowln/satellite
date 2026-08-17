@@ -196,6 +196,7 @@ class TestWithSingleEnvironment:
         assert response.queue_size == 5
 
         new_second_item = response.item
+        assert new_second_item is not None
         assert new_second_item.uid == second_item.uid
         assert new_second_item.name == second_item.name
         assert new_second_item.args == second_item.args
@@ -212,6 +213,7 @@ class TestWithSingleEnvironment:
         assert response.queue_size == 5
 
         new_second_item = response.item
+        assert new_second_item is not None
         assert new_second_item.uid != second_item.uid
         assert new_second_item.name == new_item.name
         assert new_second_item.args == new_item.args

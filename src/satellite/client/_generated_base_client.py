@@ -5,8 +5,8 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-13T21:04+00:00
-Git revision: dc1e1e6ace8e579b7266769d9535dd2334aed6d4
+Date: 2026-08-17T22:41+00:00
+Git revision: f3da6750388e0281f9978bb484f6cfd858f1a5ce
 """
 
 from abc import abstractmethod
@@ -139,14 +139,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str
             The lock key currently being used.
         """
-        default_values = {}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/unlock", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -181,7 +174,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None, "lock_key": None}
+        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None}
         original_parameters = {
             "mode": mode,
             "loop": loop,
@@ -214,14 +207,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"enable": enable, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"enable": enable, "lock_key": lock_key}
         response = await self.post_implementation("/queue/autostart", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -239,14 +225,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/environment/open", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -264,14 +243,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/environment/close", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -292,14 +264,7 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/environment/destroy", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -365,14 +330,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/clear", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -426,7 +384,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "item": item,
             "pos": pos,
@@ -493,7 +451,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "items": items,
             "pos": pos,
@@ -539,7 +497,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": None, "uid": None, "lock_key": None}
+        default_values = {"pos": None, "uid": None}
         original_parameters = {"pos": pos, "uid": uid, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -571,7 +529,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"ignore_missing": True, "lock_key": None}
+        default_values = {"ignore_missing": True}
         original_parameters = {"uids": uids, "ignore_missing": ignore_missing, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -612,7 +570,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"replace": False, "lock_key": None}
+        default_values = {"replace": False}
         original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -676,14 +634,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {
-            "pos": None,
-            "uid": None,
-            "pos_dest": None,
-            "before_uid": None,
-            "after_uid": None,
-            "lock_key": None,
-        }
+        default_values = {"pos": None, "uid": None, "pos_dest": None, "before_uid": None, "after_uid": None}
         original_parameters = {
             "pos": pos,
             "uid": uid,
@@ -744,7 +695,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False, "lock_key": None}
+        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False}
         original_parameters = {
             "uids": uids,
             "pos_dest": pos_dest,
@@ -785,14 +736,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"item": item, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"item": item, "lock_key": lock_key}
         response = await self.post_implementation("/queue/item/execute", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -809,14 +753,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/start", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -836,14 +773,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/stop", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -863,14 +793,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/stop/cancel", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -897,7 +820,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"option": "deferred", "lock_key": None}
+        default_values = {"option": "deferred"}
         original_parameters = {"option": option, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -921,14 +844,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/resume", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -945,14 +861,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/stop", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -969,14 +878,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/abort", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -993,14 +895,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/halt", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1227,14 +1122,7 @@ class BaseSyncClient:
         lock_key : str
             The lock key currently being used.
         """
-        default_values = {}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/unlock", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1269,7 +1157,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None, "lock_key": None}
+        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None}
         original_parameters = {
             "mode": mode,
             "loop": loop,
@@ -1302,14 +1190,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"enable": enable, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"enable": enable, "lock_key": lock_key}
         response = self.post_implementation("/queue/autostart", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1327,14 +1208,7 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/environment/open", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1352,14 +1226,7 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/environment/close", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1380,14 +1247,7 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/environment/destroy", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1453,14 +1313,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/clear", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1514,7 +1367,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "item": item,
             "pos": pos,
@@ -1581,7 +1434,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "items": items,
             "pos": pos,
@@ -1627,7 +1480,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": None, "uid": None, "lock_key": None}
+        default_values = {"pos": None, "uid": None}
         original_parameters = {"pos": pos, "uid": uid, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1659,7 +1512,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"ignore_missing": True, "lock_key": None}
+        default_values = {"ignore_missing": True}
         original_parameters = {"uids": uids, "ignore_missing": ignore_missing, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1700,7 +1553,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"replace": False, "lock_key": None}
+        default_values = {"replace": False}
         original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1764,14 +1617,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {
-            "pos": None,
-            "uid": None,
-            "pos_dest": None,
-            "before_uid": None,
-            "after_uid": None,
-            "lock_key": None,
-        }
+        default_values = {"pos": None, "uid": None, "pos_dest": None, "before_uid": None, "after_uid": None}
         original_parameters = {
             "pos": pos,
             "uid": uid,
@@ -1832,7 +1678,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False, "lock_key": None}
+        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False}
         original_parameters = {
             "uids": uids,
             "pos_dest": pos_dest,
@@ -1873,14 +1719,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"item": item, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"item": item, "lock_key": lock_key}
         response = self.post_implementation("/queue/item/execute", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1897,14 +1736,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/start", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1924,14 +1756,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/stop", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1951,14 +1776,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/stop/cancel", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -1985,7 +1803,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"option": "deferred", "lock_key": None}
+        default_values = {"option": "deferred"}
         original_parameters = {"option": option, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -2009,14 +1827,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/resume", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -2033,14 +1844,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/stop", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -2057,14 +1861,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/abort", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())
@@ -2081,14 +1878,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/halt", **parameters)
         if response.status_code != 200:
             logger.error("Request has failed: %s", response.json())

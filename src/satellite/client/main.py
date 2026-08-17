@@ -8,6 +8,11 @@ import sys
 
 import click
 
+PASSTHROUGH_ARGUMENTS = {
+    "lock_key",
+}
+"""Method argument names that should be sent to the HTTP verb implementation regardless of whether it has been set."""
+
 _GET_ASYNC_CODE = Template("""
 $get_parameters_expr
 response = await self.get_implementation(\"$endpoint\", **parameters)
@@ -123,6 +128,14 @@ def _parse_args_and_kwargs_from_node(node: ast.FunctionDef | ast.AsyncFunctionDe
     # Fast path: if there's not parameters, avoid all the useless filtering
     if all_parameters_dict == "original_parameters = {}":
         return return_type_conversion, "parameters = {}"
+
+    default_parameter_values = dict(
+        filter(lambda v: v[0] not in PASSTHROUGH_ARGUMENTS, default_parameter_values.items())
+    )
+
+    # Fast path: if there's no default values left, avoid all the useless filtering
+    if len(default_parameter_values) == 0:
+        return return_type_conversion, all_parameters_dict.replace("original_parameters", "parameters", 1)
 
     get_parameters_expr = Template("""
 default_values = $default_parameter_values

@@ -367,6 +367,30 @@ class TestWithSingleEnvironment:
 
             assert new_item_uids == item_uids
 
+    def test_lock_unlock_with_property(self, python_client: SyncClient):
+        python_client.lock_key = "12345"
+
+        response = python_client.lock(environment=True, queue=True)
+        assert response.success, response.msg
+        assert response.lock_info.is_environment_locked
+        assert response.lock_info.is_queue_locked
+
+        # Should add the lock key automatically to requests.
+        item = QueueItem(name="simple_plan", args=["rand"])
+        response = python_client.queue_item_add(item)
+        assert response.success, response.msg
+
+        python_client.lock_key = None
+
+        # Should error out since the lock_key property is no longer set
+        with pytest.raises(RuntimeError):
+            python_client.unlock()
+
+        response = python_client.unlock(lock_key="12345")
+        assert response.success, response.msg
+        assert not response.lock_info.is_environment_locked
+        assert not response.lock_info.is_queue_locked
+
 
 @pytest.fixture
 def python_client_with_auth(monkeypatch, tmp_path):

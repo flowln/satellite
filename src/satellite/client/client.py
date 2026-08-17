@@ -9,7 +9,7 @@ from uuid import UUID
 import httpx
 import pydantic
 
-from satellite.models import ManagerStatus, SuccessfulLoginResponse, UserInformation
+from satellite.models import LockResponse, ManagerStatus, SuccessfulLoginResponse, UserInformation
 
 from ._generated_base_client import BaseAsyncClient, BaseSyncClient
 
@@ -66,6 +66,9 @@ def _serialize_value(value: Any) -> tuple[Literal["query", "body"], str | list |
         return "query", str(value)
     elif isinstance(value, Sequence):
         return "body", [_serialize_value(_v)[1] for _v in value]
+    elif value is None:
+        # NOTE: Give the calling code a chance to replace default values.
+        return "query", value
     else:
         return "query", str(value)
 
@@ -73,22 +76,38 @@ def _serialize_value(value: Any) -> tuple[Literal["query", "body"], str | list |
 class AsyncClient(BaseAsyncClient):
     """Python client for communication with the satellite server via asynchronous httpx requests."""
 
+    def __init__(self, server_address: httpx.URL | str, queue_name: str | None = None, **kwargs):
+        super().__init__(server_address, queue_name, **kwargs)
+
+        self._lock_key = None
+
+    @property
+    def lock_key(self) -> str | None:
+        """Client-wide lock key to use in requests that need it."""
+        return self._lock_key
+
+    @lock_key.setter
+    def lock_key(self, value: str | None) -> None:
+        self._lock_key = value
+
+    def _maybe_populate_lock_key(self, query_parameters: dict[str, Any]) -> dict[str, Any]:
+        if query_parameters.get("lock_key") is None:
+            if self.lock_key is None:
+                query_parameters.pop("lock_key", None)
+            else:
+                query_parameters["lock_key"] = self.lock_key
+        print(type(query_parameters.get("lock_key")))
+        return query_parameters
+
     async def get_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         """Perform a GET request and return the result."""
-        request_url = endpoint
+        query_parameters = kwargs
+        query_parameters = self._maybe_populate_lock_key(query_parameters)
 
-        if len(kwargs) > 0:
-            request_url += "?"
+        logger.debug("Sending GET request to '%s'.", endpoint)
+        logger.debug("  Query parameters: %s", " ".join(f"{_k}={_v}" for _k, _v in query_parameters.items()))
 
-            parameters = []
-            for key, val in kwargs.items():
-                parameters.append(f"{key}={str(val)}")
-
-            request_url += "&".join(parameters)
-
-        logger.debug("Sending GET request to '%s'.", request_url)
-
-        return await self.get(request_url)
+        return await self.get(endpoint, params=query_parameters)
 
     async def post_implementation(self, endpoint: str, **kwargs) -> httpx.Response:
         """Perform a POST request and return the result."""
@@ -109,6 +128,8 @@ class AsyncClient(BaseAsyncClient):
                         where,
                         value,
                     )
+
+        query_parameters = self._maybe_populate_lock_key(query_parameters)
 
         logger.debug("Sending POST request to '%s' with the following data:", endpoint)
         logger.debug("  Query parameters: %s", " ".join(f"{_k}={_v}" for _k, _v in query_parameters.items()))
@@ -319,6 +340,44 @@ class AsyncClient(BaseAsyncClient):
         parsed_response = UserInformation.model_validate(response.json())
         return parsed_response
 
+    async def lock(
+        self, lock_key: str | None = None, environment: bool = False, queue: bool = False, note: str | None = None
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str, optional
+            The lock key currently being used. If None, use the `lock_key` client property.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        """
+        lock_key = lock_key or self.lock_key
+        if lock_key is None:
+            raise RuntimeError("Locking has failed: No 'lock_key' is configured for this client.")
+
+        return await super().lock(lock_key, environment, queue, note)
+
+    async def unlock(self, lock_key: str | None = None) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str, optional
+            The lock key currently being used. If None, use the 'lock_key' client property.
+        """
+        lock_key = lock_key or self.lock_key
+        if lock_key is None:
+            raise RuntimeError("Unlocking has failed: No 'lock_key' is configured for this client.")
+
+        return await super().unlock(lock_key)
+
 
 class SyncClient(BaseSyncClient):
     """Python client for communication with the satellite server via synchronous httpx requests."""
@@ -326,6 +385,15 @@ class SyncClient(BaseSyncClient):
     def __init__(self, server_address: httpx.URL | str, queue_name: str | None = None, **kwargs):
         self._loop = asyncio.new_event_loop()
         self._client = AsyncClient(server_address, queue_name, **kwargs)
+
+    @property
+    def lock_key(self) -> str | None:
+        """Client-wide lock key to use in requests that need it."""
+        return cast(AsyncClient, self._client).lock_key
+
+    @lock_key.setter
+    def lock_key(self, value: str | None) -> None:
+        cast(AsyncClient, self._client).lock_key = value
 
     def wait_for_condition(
         self,
@@ -482,3 +550,33 @@ class SyncClient(BaseSyncClient):
     def whoami(self) -> UserInformation:
         """Query information about the owner of the currently configured authentication token."""
         return self._run_coroutine(self._client.whoami())
+
+    def lock(
+        self, lock_key: str | None = None, environment: bool = False, queue: bool = False, note: str | None = None
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str, optional
+            The lock key currently being used. If None, use the `lock_key` client property.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        """
+        return self._run_coroutine(cast(AsyncClient, self._client).lock(lock_key, environment, queue, note))
+
+    def unlock(self, lock_key: str | None = None) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str, optional
+            The lock key currently being used. If None, use the 'lock_key' client property.
+        """
+        return self._run_coroutine(cast(AsyncClient, self._client).unlock(lock_key))

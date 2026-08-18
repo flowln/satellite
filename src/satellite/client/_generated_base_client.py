@@ -5,13 +5,14 @@ Instead, check 'main.py' for the logic that generates it or,
 if applicable, change the final client code in 'client.py' instead.
 
 This file was generated at:
-Date: 2026-08-12T22:37+00:00
-Git revision: 7e6c196dd1c5d02d3c0dfec3d49ef8c4daad2a75
+Date: 2026-08-17T22:41+00:00
+Git revision: f3da6750388e0281f9978bb484f6cfd858f1a5ce
 """
 
 from abc import abstractmethod
 import asyncio
 from collections.abc import Coroutine
+import logging
 from typing import Any, Literal
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from satellite.models import (
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,
+    LockResponse,
     ManagerStatus,
     QueueAddRemoveBatchResponse,
     QueueAddRemoveResponse,
@@ -34,6 +36,8 @@ from satellite.models import (
     SuccessfulLoginResponse,
     UserInformation,
 )
+
+logger = logging.getLogger("satellite.client")
 
 
 class BaseAsyncClient(httpx.AsyncClient):
@@ -76,7 +80,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Test connectivity with the queue manager. Always responds 'pong'."""
         parameters = {}
         response = await self.get_implementation("/ping", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = response.json()
         return ret
 
@@ -84,8 +90,61 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve the current state of the manager."""
         parameters = {}
         response = await self.get_implementation("/status", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
+        return ret
+
+    async def lock(
+        self, lock_key: str, environment: bool = False, queue: bool = False, note: str | None = None
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        user : str, optional
+            The user who is locking the manager.
+        """
+        default_values = {"environment": False, "queue": False, "note": None}
+        original_parameters = {"lock_key": lock_key, "environment": environment, "queue": queue, "note": note}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = await self.post_implementation("/lock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
+        return ret
+
+    async def unlock(self, lock_key: str) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        """
+        parameters = {"lock_key": lock_key}
+        response = await self.post_implementation("/unlock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
         return ret
 
     async def queue_mode_set(
@@ -115,7 +174,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None, "lock_key": None}
+        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None}
         original_parameters = {
             "mode": mode,
             "loop": loop,
@@ -130,7 +189,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/mode/set", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -146,16 +207,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"enable": enable, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"enable": enable, "lock_key": lock_key}
         response = await self.post_implementation("/queue/autostart", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -169,16 +225,11 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/environment/open", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -192,16 +243,11 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/environment/close", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -218,16 +264,11 @@ class BaseAsyncClient(httpx.AsyncClient):
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/environment/destroy", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -254,7 +295,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/history/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
@@ -262,7 +305,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Clear the history of previously ran plans."""
         parameters = {}
         response = await self.post_implementation("/history/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -270,7 +315,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve a list of all items currently in the queue."""
         parameters = {}
         response = await self.get_implementation("/queue/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
 
@@ -283,16 +330,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -342,7 +384,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "item": item,
             "pos": pos,
@@ -357,7 +399,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/add", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -407,7 +451,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "items": items,
             "pos": pos,
@@ -422,7 +466,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/add/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -451,7 +497,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": None, "uid": None, "lock_key": None}
+        default_values = {"pos": None, "uid": None}
         original_parameters = {"pos": pos, "uid": uid, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -460,7 +506,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/remove", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -481,7 +529,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"ignore_missing": True, "lock_key": None}
+        default_values = {"ignore_missing": True}
         original_parameters = {"uids": uids, "ignore_missing": ignore_missing, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -490,7 +538,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/remove/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -520,7 +570,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"replace": False, "lock_key": None}
+        default_values = {"replace": False}
         original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -529,7 +579,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -582,14 +634,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {
-            "pos": None,
-            "uid": None,
-            "pos_dest": None,
-            "before_uid": None,
-            "after_uid": None,
-            "lock_key": None,
-        }
+        default_values = {"pos": None, "uid": None, "pos_dest": None, "before_uid": None, "after_uid": None}
         original_parameters = {
             "pos": pos,
             "uid": uid,
@@ -605,7 +650,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/move", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -648,7 +695,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False, "lock_key": None}
+        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False}
         original_parameters = {
             "uids": uids,
             "pos_dest": pos_dest,
@@ -664,7 +711,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/queue/item/move/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -687,16 +736,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"item": item, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"item": item, "lock_key": lock_key}
         response = await self.post_implementation("/queue/item/execute", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -709,16 +753,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/start", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -734,16 +773,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -759,16 +793,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/queue/stop/cancel", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -791,7 +820,7 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"option": "deferred", "lock_key": None}
+        default_values = {"option": "deferred"}
         original_parameters = {"option": option, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -800,7 +829,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.post_implementation("/re/pause", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -813,16 +844,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/resume", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -835,16 +861,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -857,16 +878,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/abort", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -879,16 +895,11 @@ class BaseAsyncClient(httpx.AsyncClient):
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = await self.post_implementation("/re/halt", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -916,7 +927,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/re/runs", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
@@ -938,7 +951,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/console_output", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -962,7 +977,9 @@ class BaseAsyncClient(httpx.AsyncClient):
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = await self.get_implementation("/console_output_update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -975,7 +992,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """
         parameters = {}
         response = await self.get_implementation("/console_output/uid", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
         return ret
 
@@ -983,7 +1002,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve a list of allowed plans for the current user."""
         parameters = {}
         response = await self.get_implementation("/plans/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedPlansResponse.model_validate(response.json())
         return ret
 
@@ -991,7 +1012,9 @@ class BaseAsyncClient(httpx.AsyncClient):
         """Retrieve a list of allowed devices for the current user."""
         parameters = {}
         response = await self.get_implementation("/devices/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedDevicesResponse.model_validate(response.json())
         return ret
 
@@ -1040,7 +1063,9 @@ class BaseSyncClient:
         """Test connectivity with the queue manager. Always responds 'pong'."""
         parameters = {}
         response = self.get_implementation("/ping", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = response.json()
         return ret
 
@@ -1048,8 +1073,61 @@ class BaseSyncClient:
         """Retrieve the current state of the manager."""
         parameters = {}
         response = self.get_implementation("/status", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ManagerStatus.model_validate(response.json())
+        return ret
+
+    def lock(
+        self, lock_key: str, environment: bool = False, queue: bool = False, note: str | None = None
+    ) -> LockResponse:
+        """
+        Lock the manager, preventing other users from accessing some write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        environment : bool, optional
+            Lock environment operations (open, close, RunEngine operations).
+        queue : bool, optional
+            Lock queue operations (add, remove, move items on the queue).
+        note : str, optional
+            Optional message to leave to other users to clarify why the manager is currently locked.
+        user : str, optional
+            The user who is locking the manager.
+        """
+        default_values = {"environment": False, "queue": False, "note": None}
+        original_parameters = {"lock_key": lock_key, "environment": environment, "queue": queue, "note": note}
+        parameters = original_parameters.copy()
+        for arg_name in original_parameters.keys():
+            if arg_name not in default_values:
+                continue
+            if original_parameters[arg_name] == default_values[arg_name]:
+                del parameters[arg_name]
+        response = self.post_implementation("/lock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
+        return ret
+
+    def unlock(self, lock_key: str) -> LockResponse:
+        """
+        Unlock the manager, allowing other users to access write endpoints.
+
+        Parameters
+        ----------
+        lock_key : str
+            The lock key currently being used.
+        """
+        parameters = {"lock_key": lock_key}
+        response = self.post_implementation("/unlock", **parameters)
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
+        ret = LockResponse.model_validate(response.json())
         return ret
 
     def queue_mode_set(
@@ -1079,7 +1157,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None, "lock_key": None}
+        default_values = {"mode": None, "loop": None, "ignore_failures": None, "autostart": None}
         original_parameters = {
             "mode": mode,
             "loop": loop,
@@ -1094,7 +1172,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/mode/set", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1110,16 +1190,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"enable": enable, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"enable": enable, "lock_key": lock_key}
         response = self.post_implementation("/queue/autostart", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1133,16 +1208,11 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/environment/open", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1156,16 +1226,11 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/environment/close", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1182,16 +1247,11 @@ class BaseSyncClient:
             The lock key currently being used.
 
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/environment/destroy", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1218,7 +1278,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/history/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = HistoryResponse.model_validate(response.json())
         return ret
 
@@ -1226,7 +1288,9 @@ class BaseSyncClient:
         """Clear the history of previously ran plans."""
         parameters = {}
         response = self.post_implementation("/history/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1234,7 +1298,9 @@ class BaseSyncClient:
         """Retrieve a list of all items currently in the queue."""
         parameters = {}
         response = self.get_implementation("/queue/get", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueResponse.model_validate(response.json())
         return ret
 
@@ -1247,16 +1313,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/clear", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1306,7 +1367,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "item": item,
             "pos": pos,
@@ -1321,7 +1382,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/add", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1371,7 +1434,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": "back", "before_uid": None, "after_uid": None, "lock_key": None}
+        default_values = {"pos": "back", "before_uid": None, "after_uid": None}
         original_parameters = {
             "items": items,
             "pos": pos,
@@ -1386,7 +1449,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/add/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -1415,7 +1480,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos": None, "uid": None, "lock_key": None}
+        default_values = {"pos": None, "uid": None}
         original_parameters = {"pos": pos, "uid": uid, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1424,7 +1489,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/remove", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1445,7 +1512,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"ignore_missing": True, "lock_key": None}
+        default_values = {"ignore_missing": True}
         original_parameters = {"uids": uids, "ignore_missing": ignore_missing, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1454,7 +1521,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/remove/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -1484,7 +1553,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"replace": False, "lock_key": None}
+        default_values = {"replace": False}
         original_parameters = {"item": item, "replace": replace, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1493,7 +1562,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1546,14 +1617,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {
-            "pos": None,
-            "uid": None,
-            "pos_dest": None,
-            "before_uid": None,
-            "after_uid": None,
-            "lock_key": None,
-        }
+        default_values = {"pos": None, "uid": None, "pos_dest": None, "before_uid": None, "after_uid": None}
         original_parameters = {
             "pos": pos,
             "uid": uid,
@@ -1569,7 +1633,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/move", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1612,7 +1678,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False, "lock_key": None}
+        default_values = {"pos_dest": None, "before_uid": None, "after_uid": None, "reorder": False}
         original_parameters = {
             "uids": uids,
             "pos_dest": pos_dest,
@@ -1628,7 +1694,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/queue/item/move/batch", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveBatchResponse.model_validate(response.json())
         return ret
 
@@ -1651,16 +1719,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"item": item, "lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"item": item, "lock_key": lock_key}
         response = self.post_implementation("/queue/item/execute", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = QueueAddRemoveResponse.model_validate(response.json())
         return ret
 
@@ -1673,16 +1736,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/start", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1698,16 +1756,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1723,16 +1776,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/queue/stop/cancel", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1755,7 +1803,7 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"option": "deferred", "lock_key": None}
+        default_values = {"option": "deferred"}
         original_parameters = {"option": option, "lock_key": lock_key}
         parameters = original_parameters.copy()
         for arg_name in original_parameters.keys():
@@ -1764,7 +1812,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.post_implementation("/re/pause", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1777,16 +1827,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/resume", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1799,16 +1844,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/stop", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1821,16 +1861,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/abort", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1843,16 +1878,11 @@ class BaseSyncClient:
         lock_key : str, optional
             The lock key currently being used.
         """
-        default_values = {"lock_key": None}
-        original_parameters = {"lock_key": lock_key}
-        parameters = original_parameters.copy()
-        for arg_name in original_parameters.keys():
-            if arg_name not in default_values:
-                continue
-            if original_parameters[arg_name] == default_values[arg_name]:
-                del parameters[arg_name]
+        parameters = {"lock_key": lock_key}
         response = self.post_implementation("/re/halt", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = GenericResponse.model_validate(response.json())
         return ret
 
@@ -1880,7 +1910,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/re/runs", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = RunEngineRunsResponse.model_validate(response.json())
         return ret
 
@@ -1902,7 +1934,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/console_output", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -1926,7 +1960,9 @@ class BaseSyncClient:
             if original_parameters[arg_name] == default_values[arg_name]:
                 del parameters[arg_name]
         response = self.get_implementation("/console_output_update", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = LatestConsoleResponse.model_validate(response.json())
         return ret
 
@@ -1939,7 +1975,9 @@ class BaseSyncClient:
         """
         parameters = {}
         response = self.get_implementation("/console_output/uid", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = ConsoleUidResponse.model_validate(response.json())
         return ret
 
@@ -1947,7 +1985,9 @@ class BaseSyncClient:
         """Retrieve a list of allowed plans for the current user."""
         parameters = {}
         response = self.get_implementation("/plans/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedPlansResponse.model_validate(response.json())
         return ret
 
@@ -1955,6 +1995,8 @@ class BaseSyncClient:
         """Retrieve a list of allowed devices for the current user."""
         parameters = {}
         response = self.get_implementation("/devices/allowed", **parameters)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error("Request has failed: %s", response.json())
+            response.raise_for_status()
         ret = AllowedDevicesResponse.model_validate(response.json())
         return ret

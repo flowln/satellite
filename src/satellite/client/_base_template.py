@@ -32,6 +32,7 @@ from abc import abstractmethod
 import asyncio
 from collections.abc import Coroutine
 import json
+import logging
 from typing import Literal, Any
 from uuid import UUID
 
@@ -46,6 +47,7 @@ from satellite.models import (
     GenericResponse,
     HistoryResponse,
     LatestConsoleResponse,
+    LockResponse,
     ManagerStatus,
     QueueAddRemoveResponse,
     QueueAddRemoveBatchResponse,
@@ -55,6 +57,8 @@ from satellite.models import (
     SuccessfulLoginResponse,
     UserInformation,
 )
+
+logger = logging.getLogger("satellite.client")
 
 
 class BaseAsyncClient(httpx.AsyncClient):

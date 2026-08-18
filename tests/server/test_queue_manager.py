@@ -9,6 +9,7 @@ from satellite.models import (
     ConsoleUidResponse,
     HistoryItem,
     LatestConsoleResponse,
+    LockResponse,
     ManagerStatus,
     QueueItem,
     RunEngineRunsResponse,
@@ -16,6 +17,19 @@ from satellite.models import (
 from satellite.server.persistence import RedisPersistenceBackend
 
 from .utils import assert_response, open_environment, wait_for_idle, wait_status_change
+
+
+async def wait_history_change(client: httpx.AsyncClient, remaining_items: int):
+    while True:
+        _status = (await client.get("/queue/status")).json()
+        model = ManagerStatus.model_validate(_status)
+
+        assert model.worker_environment_exists
+
+        if model.items_in_history == remaining_items:
+            break
+
+        await asyncio.sleep(0.05)
 
 
 class TestWithSingleEnvironment:
@@ -36,6 +50,8 @@ class TestWithSingleEnvironment:
 
     @pytest.fixture(autouse=True, scope="function")
     async def clear_queue_and_history_before_test(self, client: httpx.AsyncClient):
+        await wait_status_change(client, wait_for_idle(client))
+
         (await client.post("/queue/queue/clear")).raise_for_status()
         (await client.post("/queue/history/clear")).raise_for_status()
 
@@ -428,25 +444,13 @@ class TestWithSingleEnvironment:
         status = ManagerStatus.model_validate(response.json())
         assert status.worker_environment_exists
 
-        async def wait_history_change(remaining_items: int):
-            while True:
-                _status = (await client.get("/queue/status")).json()
-                model = ManagerStatus.model_validate(_status)
-
-                assert model.worker_environment_exists
-
-                if model.items_in_history == remaining_items:
-                    break
-
-                await asyncio.sleep(0.05)
-
-        await wait_status_change(client, wait_history_change(1))
-        await wait_status_change(client, wait_history_change(2))
+        await wait_status_change(client, wait_history_change(client, 1))
+        await wait_status_change(client, wait_history_change(client, 2))
 
         assert_response(await client.post("/queue/queue/stop"))
 
         # Run until the end of the current run
-        await wait_status_change(client, wait_history_change(3))
+        await wait_status_change(client, wait_history_change(client, 3))
 
         await asyncio.sleep(0.25)  # Ensure it doesn't start a new run in the meantime
         status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
@@ -454,12 +458,12 @@ class TestWithSingleEnvironment:
 
         assert_response(await client.post("/queue/queue/start"))
 
-        await wait_status_change(client, wait_history_change(5))
+        await wait_status_change(client, wait_history_change(client, 5))
 
         assert_response(await client.post("/queue/queue/stop"))
         assert_response(await client.post("/queue/queue/stop/cancel"))
 
-        await wait_status_change(client, wait_history_change(7))
+        await wait_status_change(client, wait_history_change(client, 7))
 
         status = ManagerStatus.model_validate((await client.get("/queue/status")).json())
         assert status.manager_state == "idle"
@@ -522,6 +526,108 @@ class TestWithSingleEnvironment:
         await wait_status_change(client, wait_run_list_change("active", 2))
         await wait_status_change(client, wait_run_list_change("open", 0))
         await wait_status_change(client, wait_run_list_change("closed", 2))
+
+    async def test_lock_key_for_environment(self, client: httpx.AsyncClient):
+        response = assert_response(
+            await client.post(
+                "/lock", params={"lock_key": "1234", "environment": True, "note": "locked for testing reasons"}
+            )
+        )
+        parsed_response = LockResponse.model_validate(response.json())
+        assert parsed_response.lock_info.is_environment_locked
+        assert not parsed_response.lock_info.is_queue_locked
+
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+
+        # Only locked environment, not queue
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 200
+
+        response = await client.post("/queue/start")
+        assert response.status_code == 423
+
+        response = await client.post("/queue/start", params={"lock_key": "1234"})
+        assert response.status_code == 200
+
+        await wait_status_change(client, wait_history_change(client, 1))
+
+        response = assert_response(await client.post("/unlock", params={"lock_key": "1234"}))
+        parsed_response = LockResponse.model_validate(response.json())
+        assert not parsed_response.lock_info.is_environment_locked
+        assert not parsed_response.lock_info.is_queue_locked
+
+        response = await client.post("/queue/item/add", json=request_body, params={"lock_key": "1234"})
+        assert response.status_code == 200
+
+        response = await client.post("/queue/start")
+        assert response.status_code == 200
+
+        await wait_status_change(client, wait_history_change(client, 2))
+
+    async def test_lock_key_for_queue(self, client: httpx.AsyncClient):
+        response = assert_response(
+            await client.post("/lock", params={"lock_key": "1234", "queue": True, "note": "locked for testing reasons"})
+        )
+        parsed_response = LockResponse.model_validate(response.json())
+        assert not parsed_response.lock_info.is_environment_locked
+        assert parsed_response.lock_info.is_queue_locked
+
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+
+        response = await client.post("/queue/item/add", json=request_body, params={"lock_key": "1234"})
+        assert response.status_code == 200
+
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 423
+
+        # Only locked queue, not environment
+        response = await client.post("/queue/start")
+        assert response.status_code == 200
+
+        await wait_status_change(client, wait_history_change(client, 1))
+
+        response = assert_response(await client.post("/unlock", params={"lock_key": "1234"}))
+        parsed_response = LockResponse.model_validate(response.json())
+        assert not parsed_response.lock_info.is_environment_locked
+        assert not parsed_response.lock_info.is_queue_locked
+
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 200
+
+    async def test_emergency_lock_key(self, client: httpx.AsyncClient):
+        response = assert_response(
+            await client.post(
+                "/lock",
+                params={"lock_key": "1234", "environment": True, "queue": True, "note": "locked for testing reasons"},
+            )
+        )
+        parsed_response = LockResponse.model_validate(response.json())
+        assert parsed_response.lock_info.is_environment_locked
+        assert parsed_response.lock_info.is_queue_locked
+
+        item = QueueItem(name="simple_plan", args=["rand"])
+        request_body = {"item": item.model_dump(mode="json")}
+
+        response = await client.post("/queue/item/add", json=request_body, params={"lock_key": "1234"})
+        assert response.status_code == 200
+
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 423
+
+        response = await client.post("/queue/start", params={"lock_key": "emergency_test_key"})
+        assert response.status_code == 200
+
+        await wait_status_change(client, wait_history_change(client, 1))
+
+        response = assert_response(await client.post("/unlock", params={"lock_key": "emergency_test_key"}))
+        parsed_response = LockResponse.model_validate(response.json())
+        assert not parsed_response.lock_info.is_environment_locked
+        assert not parsed_response.lock_info.is_queue_locked
+
+        response = await client.post("/queue/item/add", json=request_body)
+        assert response.status_code == 200
 
 
 @pytest.fixture

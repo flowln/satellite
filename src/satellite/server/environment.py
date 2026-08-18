@@ -195,7 +195,7 @@ class EnvironmentProcess:
         try:
             self._event_loop.run_forever()
         finally:
-            self._conn.close()
+            self._event_loop.run_until_complete(self._conn.close())
 
             if self._poll_timer.is_alive():
                 self._poll_timer.close()

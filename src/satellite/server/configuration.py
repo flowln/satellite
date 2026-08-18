@@ -231,6 +231,9 @@ class _ManagerOperationSection(BaseModel):
     console_logging_level: Literal["VERBOSE", "NORMAL", "QUIET", "SILENT"] = Field(default="NORMAL")
     """Configure the logging module's logging level used. Corresponds to `logging.DEBUG` - `logging.ERROR`, in order."""
 
+    emergency_key: str | None = Field(default=None)
+    """Master key for unlocking the queue regardless of who locked it."""
+
     @property
     def actual_logging_level(self) -> int:
         match self.console_logging_level:

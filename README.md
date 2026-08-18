@@ -21,7 +21,7 @@ These are the missing features in relation to the original implementations, that
 - [ ] Python library / Command-line interface
   - [X] Python library (Sync and Async versions)
   - [ ] Command-line utility (TODO: Investigate usefulness. Maybe this can be targeted as a devops support tool, not an end-user utility)
-- [ ] Lock key support
+- [X] Lock key support
 - [ ] ZMQ endpoints (TODO: Validate whether this makes sense to add, or is too big a burden for too little usage, I have no idea who uses it directly)
 - [ ] HTTP API configuration (i.e. HTTPS support and configure 200 error responses with `success=False` or 4XX responses)
 - [ ] WebSocket endpoints

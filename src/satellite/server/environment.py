@@ -205,6 +205,8 @@ class EnvironmentProcess:
     async def _setup_environment(self):
         self._logger.debug("Setting up environment...")
 
+        self._poll_timer = PollingThread(self._poll_for_messages)
+
         connection_loop, reader, writer = await create_streams_from_event_loop(
             self._connection_host, self._connection_port
         )
@@ -214,16 +216,15 @@ class EnvironmentProcess:
 
         try:
             self._populate_from_startup()
+            self._parse_objects_from_globals()
         except Exception as exc:
             await self._conn.send_message(HealthCheckStatus(HealthStatus.Closing))
 
             self._logger.error("Exception was raised while loading environment:", exc_info=exc)
+            self._event_loop.stop()
 
-            raise
+            return
 
-        self._parse_objects_from_globals()
-
-        self._poll_timer = PollingThread(self._poll_for_messages)
         self._poll_timer.start()
 
         await self._conn.send_message(HealthCheckStatus(HealthStatus.Idle))

@@ -776,8 +776,18 @@ class QueueManager:
             return ret
 
         # Reload annotation caches with the new environment.
-        await self._retrieve_plan_annotations(allow_cached=False)
-        await self._retrieve_device_annotations(allow_cached=False)
+        annotations = await self._retrieve_plan_annotations(allow_cached=False)
+        if annotations is None:
+            ret.success = False
+            ret.msg = "Failed to open environment: Failed to retrieve plan annotations."
+
+            return ret
+        annotations = await self._retrieve_device_annotations(allow_cached=False)
+        if annotations is None:
+            ret.success = False
+            ret.msg = "Failed to open environment: Failed to retrieve device annotations."
+
+            return ret
 
         return ret
 

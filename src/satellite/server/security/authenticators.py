@@ -30,7 +30,38 @@ class DictionaryAuthenticator(Authenticator):
 
 
 class LDAPAuthenticator(Authenticator):
-    """Authenticate users via querying LDAP resources."""
+    """
+    Authenticate users via querying LDAP resources.
+
+    Parameters
+    ----------
+    server_address : str
+        URL address where a valid LDAP server is reachable.
+    server_port : int
+        The network port on which the LDAP server is reachable.
+        Generally 636 for SSL connections or 389 for non-SSL ones.
+    use_tls : bool, optional
+        Whether to use TLS when connecting to the server.
+    use_ssl : bool, optional
+        Whether to use SSL when connecting to the server. Defaults to False.
+    bind_dn_template : str, optional
+        Pattern used to convert a username into a domain name entry.
+        Use the '{username}' string to replace the username on that location.
+    user_search_base : str, optional
+        Instead of directly checking authentication by trying to bind to the root,
+        search for the user inside the LDAP structure at this location. Currently unused.
+    user_name_regex : str, optional
+        Validate user domain names against this regular expression to ensure no
+        malicious strings are sent to the LDAP server.
+    mock : bool, optional
+        Instead of communicating with a real server, use a mocked LDAP implementation
+        for authentication queries. Useful for automated testing.
+    mock_entries : sequence of pairs of strings, optional
+        Pairs of (username, password) to add to a mocked LDAP server implementation
+        for testing purposes.
+    **kwargs : dictionary of arguments
+        Extra arguments that the user may specify. These are all ignored.
+    """
 
     DEFAULT_USER_VALIDATION_REGEX = r"""(?:([^=,]+=[^=,]+,?)+)|(?:[^=,]+)"""
 
@@ -38,20 +69,33 @@ class LDAPAuthenticator(Authenticator):
         self,
         server_address: str,
         server_port: int,
+        use_tls: bool = False,
         use_ssl: bool = False,
         bind_dn_template: str = "{username}",
+        user_search_base: str | None = None,
         user_name_regex: str = DEFAULT_USER_VALIDATION_REGEX,
         *,
         mock: bool = False,
         mock_entries: Sequence[tuple[str, str]] | None = None,
+        **kwargs,
     ):
         super().__init__()
 
         from ldap3 import Server
 
-        self._server = Server(server_address, port=server_port, use_ssl=use_ssl)
+        if use_tls:
+            import ssl
+
+            from ldap3 import Tls
+
+            tls_configuration = Tls(validate=ssl.CERT_REQUIRED, version=ssl.PROTOCOL_TLSv1)
+        else:
+            tls_configuration = None
+
+        self._server = Server(server_address, port=server_port, use_ssl=use_ssl, tls=tls_configuration)
 
         self._bind_dn_template = bind_dn_template
+        self._user_search_base = user_search_base
         self._user_name_regex = re.compile(user_name_regex)
 
         self._mock = mock

@@ -4,6 +4,7 @@ from uuid import UUID
 from fakeredis import FakeServer
 import httpx
 import pytest
+import yaml
 
 from satellite.models import (
     ConsoleUidResponse,
@@ -14,6 +15,7 @@ from satellite.models import (
     QueueItem,
     RunEngineRunsResponse,
 )
+from satellite.server.configuration import ManagerConfiguration
 from satellite.server.persistence import RedisPersistenceBackend
 
 from .utils import assert_response, open_environment, wait_for_idle, wait_status_change
@@ -725,3 +727,35 @@ async def test_open_environment_twice(client):
 
     async with open_environment(client):
         pass
+
+
+async def test_open_environment_with_error(tmp_path, monkeypatch):
+    configuration = ManagerConfiguration.test_configuration()
+
+    # Non-existent startup folder
+    configuration.startup.startup_directory = tmp_path / "startup"
+
+    config_path = tmp_path / "config.yaml"
+    with open(config_path, "w") as _file:
+        yaml.safe_dump(configuration.model_dump(mode="json"), stream=_file)
+
+    monkeypatch.setenv("QSERVER_CONFIG", str(config_path))
+
+    from satellite.server.main import _create_app
+
+    app = _create_app()
+
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+    response = await client.post("/environment/open")
+    response.raise_for_status()
+
+    response_body = response.json()
+    assert not response_body["success"], response_body
+
+    response = await client.get("/status")
+    response.raise_for_status()
+
+    response_body = response.json()
+    assert response_body["manager_state"] == "idle", response_body
+    assert not response_body["worker_environment_exists"], response_body

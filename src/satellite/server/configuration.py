@@ -248,7 +248,7 @@ class _ManagerOperationSection(BaseModel):
 
 
 class _ManagerStartupSection(BaseModel):
-    model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore", frozen=True)
+    model_config = ConfigDict(use_attribute_docstrings=True, extra="ignore")
 
     startup_directory: Path | None = Field(alias="startup_dir", default=None)
     """Directory path from with to load new environments."""
@@ -275,6 +275,14 @@ class ManagerConfiguration(BaseModel):
 
     managers: "dict[str, ManagerConfiguration]" = Field(default={})
     """Configuration specific to each manager. It takes priority over the default configurations."""
+
+    @staticmethod
+    def test_configuration() -> "ManagerConfiguration":
+        """Return a basic configuration meant for testing purposes."""
+        conf = ManagerConfiguration()
+        conf.authentication.allow_anonymous_access = True
+        conf.network.use_mocked_backend = True
+        return conf
 
 
 def _get_manager_configuration_location() -> Path:

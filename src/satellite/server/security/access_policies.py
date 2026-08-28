@@ -162,7 +162,7 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
     base_url : str, optional
         The server address to communicate with. Either this or 'server' must be set.
     port : int, optional
-        The port on which the remote server is listening to. Defaults to 8000.
+        The port on which the remote server is listening to. Defaults to None (use the protocol's default port).
     query_path : str, optional
         Specify a custom path for fetching the authorization data from the server. Extra variables
         can be specified with {variable}. Defaults to "/instrument/{instrument}/qserver/access".
@@ -180,7 +180,7 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
         *,
         server: str | None = None,
         base_url: str | None = None,
-        port: int = 8000,
+        port: int | None = None,
         query_path: str = "/instrument/{instrument}/qserver/access",
         update_period: int = 600,
         expiration_period: int = 2400,
@@ -199,8 +199,10 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
         except KeyError as exc:
             logger.error(f"Failed to populate query path for server-based authorization: Missing key {exc}.")
 
-        base_url = base_url or server or "localhost"
-        self._query_url = f"{base_url}:{port}{query_path_populated}"
+        url = httpx.URL(base_url or server or "http://localhost")
+        if port is not None:
+            url = url.copy_with(port=port)
+        self._query_url = url.copy_with(path=query_path_populated)
 
         if mock_responses is not None:
 
@@ -233,7 +235,13 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
         with self._request_roles_lock:
             logger.debug("Sending request for new data to '%s'.", self._query_url)
 
-            response = self._client.get(self._query_url)
+            try:
+                response = self._client.get(self._query_url)
+            except httpx.ConnectError as exc:
+                logger.error("Failed to make GET request to '%s'.", self._query_url, exc_info=exc)
+
+                return False
+
             if response.status_code != 200:
                 logger.warning(
                     "Failed with status '%s' while trying to query '%s'.", response.reason_phrase, self._query_url
@@ -244,7 +252,12 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
             try:
                 auth_document: ServerBasedExpectedResponse = response.json()
             except JSONDecodeError as exc:
-                logger.error("Failed to parse received response from the authorization server.", exc_info=exc)
+                logger.error(
+                    "Failed to parse received response from the authorization server at '%s': %s",
+                    self._query_url,
+                    response.content.decode(),
+                    exc_info=exc,
+                )
 
                 return False
 
@@ -255,6 +268,8 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
             users_dict = defaultdict(dict)
             for role_name, users in auth_document.items():
                 for user_name, user_informations in users.items():
+                    user_informations.pop("roles", None)
+
                     if "roles" not in users_dict[user_name]:
                         users_dict[user_name]["roles"] = set()
 
@@ -274,10 +289,13 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
         while self._thread_should_continue:
             response = self.request_roles_from_server()
 
-            if not response and ttime.time() - self._last_update_time >= self._expire_time:
+            if not response and (
+                ttime.time() - self._last_update_time >= self._expire_time and self._last_update_time != 0
+            ):
                 logger.warning(
-                    "We failed to communicate with the authorization server for more than '%s' seconds."
-                    "Expiring all user permissions until a new successful connection can be made."
+                    "We failed to communicate with the authorization server for more than '%d' seconds."
+                    " Expiring all user permissions until a new successful connection can be made.",
+                    self._expire_time,
                 )
 
                 self._user_scopes.clear()
@@ -288,7 +306,11 @@ class ServerBasedAPIAccessPolicy(DictionaryAPIAccessPolicy):
     def get_scopes_for_user(self, user_name: str) -> set[str]:
         """Return the API access scopes the specified user has access to."""
         if user_name not in self._user_scopes and ttime.time() - self._last_update_time > self._update_time:
-            self.request_roles_from_server()
+            if self._request_roles_lock.locked():
+                self._request_roles_lock.acquire(timeout=10)
+                self._request_roles_lock.release()
+            else:
+                self.request_roles_from_server()
 
         return self._user_scopes.get(user_name, set())
 

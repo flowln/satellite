@@ -529,6 +529,11 @@ class QueueManager:
 
         return self._status
 
+    @post_endpoint("/status/update_uid", include_in_schema=False)
+    async def status_update_uid(self) -> None:
+        """Testing facility endpoint for updating the status uid."""
+        await self._status.update_manager_state(self._status.manager_state, force=True)
+
     async def _validate_lock_key(self, request: Request, lock_key: str | None = None):
         info = self._status.lock_info
 

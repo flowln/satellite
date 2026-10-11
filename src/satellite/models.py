@@ -138,7 +138,7 @@ class ManagerStatus(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True, serialize_by_alias=True)
 
-    manager_uuid: UUID | None = Field(exclude=True, frozen=True, default=None)
+    manager_uuid: UUID | None = Field(frozen=True, default=None)
 
     version: str = Field(
         alias="msg",

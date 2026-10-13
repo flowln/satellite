@@ -301,7 +301,8 @@ def _clear_fastapi_dependencies_from_args(node: ast.AsyncFunctionDef) -> ast.Asy
     return node
 
 
-def _is_fastapi_decorator(node: ast.expr) -> bool:
+def _is_valid_fastapi_decorator(node: ast.expr) -> bool:
+    # Check that the decorator refers to a FastAPI API route.
     if not isinstance(node, ast.Call):
         return False
     if not isinstance(node.func, ast.Name):
@@ -310,6 +311,19 @@ def _is_fastapi_decorator(node: ast.expr) -> bool:
         return False
     if not isinstance(node.args[0], ast.Constant):
         return False
+
+    # Check that the decorator is valid for adding to the client API.
+    for argument in node.keywords:
+        match argument:
+            # Don't include APIs not added to the OpenAPI schema (mostly testing APIs).
+            case ast.keyword("include_in_schema", ast.Constant(False, _)):
+                return False
+            # Don't include SSE-related APIs.
+            case ast.keyword("response_class", ast.Name("EventSourceResponse", _)):
+                return False
+            case _:
+                pass
+
     return True
 
 
@@ -325,7 +339,7 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
         node.name = endpoint.replace("/", "_").removeprefix("_")
 
         node = _clear_fastapi_dependencies_from_args(node)
-        node.decorator_list = [_node for _node in node.decorator_list if not _is_fastapi_decorator(_node)]
+        node.decorator_list = [_node for _node in node.decorator_list if not _is_valid_fastapi_decorator(_node)]
 
         for _output_node in finished_node.body:
             if not isinstance(_output_node, ast.ClassDef):
@@ -360,7 +374,7 @@ def _parse_and_generate_from_class_node(class_node: ast.ClassDef, package_root: 
         match _node:
             case ast.AsyncFunctionDef(_, _, _, _decorators, _, _, _):
                 for idx, _decorator in enumerate(_node.decorator_list):
-                    if not _is_fastapi_decorator(_decorator):
+                    if not _is_valid_fastapi_decorator(_decorator):
                         continue
 
                     endpoint = str(_decorator.args[0].value)  # ty: ignore

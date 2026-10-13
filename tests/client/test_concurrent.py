@@ -9,6 +9,8 @@ import pytest
 from satellite.client.client import AsyncClient
 from satellite.client.concurrent import StatusWatcher, WatchMethod
 
+from .asgi_transport_with_streaming import ASGIStreamingTransport
+
 
 def with_timeout(func: Callable[..., bool], timeout: float = 1.0, poll_time: float = 0.01):
     _initial_time = ttime.time()
@@ -44,8 +46,30 @@ async def polling_status_watcher(monkeypatch, data_path) -> AsyncGenerator[tuple
     _watcher.stop(timeout=0.25)
 
 
-async def test_polling_status_watcher(polling_status_watcher: tuple[AsyncClient, StatusWatcher]):
-    client, watcher = polling_status_watcher
+@pytest.fixture
+async def sse_status_watcher(monkeypatch, data_path) -> AsyncGenerator[tuple[AsyncClient, StatusWatcher]]:
+    config_path = str(data_path / "startup" / "config.yaml")
+    monkeypatch.setenv("QSERVER_CONFIG", config_path)
+
+    from satellite.server.main import _create_app
+
+    app = _create_app()
+
+    _client = AsyncClient("http://test", transport=ASGIStreamingTransport(app=app))
+    _watcher = StatusWatcher(weakref.ref(_client), WatchMethod.SERVER_SENT_EVENTS)
+
+    _watcher.start()
+    yield _client, _watcher
+    _watcher.stop(timeout=0.25)
+
+
+@pytest.fixture(params=[polling_status_watcher, sse_status_watcher])
+def status_watcher(request):
+    yield request.getfixturevalue(request.param.__name__)
+
+
+async def test_status_watcher(status_watcher: tuple[AsyncClient, StatusWatcher]):
+    client, watcher = status_watcher
 
     received_status = []
 
@@ -54,9 +78,8 @@ async def test_polling_status_watcher(polling_status_watcher: tuple[AsyncClient,
 
         received_status.append(new_status)
 
-    watcher.add_callback(on_new_status, call_now=False)
+    watcher.add_callback(on_new_status, call_now=True)
 
-    assert len(received_status) == 0
     with_timeout(lambda: len(received_status) == 1)
 
     current_status = await client.status()

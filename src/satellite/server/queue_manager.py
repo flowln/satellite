@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from collections.abc import Callable
+from collections.abc import AsyncIterable, Callable
 from functools import partial, update_wrapper, wraps
 import logging
 import os
@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Security, status
+from fastapi.sse import EventSourceResponse
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -528,6 +529,29 @@ class QueueManager:
         await self.check_environment_process()
 
         return self._status
+
+    @get_endpoint(
+        "/status/stream",
+        dependencies=[Security(get_current_user, scopes=["read:status"])],
+        response_class=EventSourceResponse,
+    )
+    async def status_sse(self, request: Request) -> AsyncIterable[ManagerStatus]:
+        """
+        Retrieve the current state of the manager.
+
+        This is a Server-Sent Events (SSE) implementation, where a status object is
+        sent every time it changes. By default, a connection is maintained until the
+        client disconnects, with heart beat ping comments sent every 15 seconds.
+        """
+        last_status_uid = None
+
+        while not await request.is_disconnected():
+            if self._status.status_uid != last_status_uid:
+                last_status_uid = self._status.status_uid
+
+                yield self._status
+
+            await asyncio.sleep(0.250)
 
     @post_endpoint("/status/update_uid", include_in_schema=False)
     async def status_update_uid(self) -> None:

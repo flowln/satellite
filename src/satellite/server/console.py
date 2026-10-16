@@ -44,8 +44,10 @@ class _Buffer:
             return buffer[start:]
         return buffer[start:end]
 
-    def lookup_queue_by_uid(self, queue_name: str, start_uid: UUID, limit: int | None = None) -> list[str] | None:
-        position = self._uid_positions[queue_name].get(start_uid)
+    def lookup_queue_by_uid(
+        self, queue_name: str, start_uid: UUID | None, limit: int | None = None
+    ) -> list[str] | None:
+        position = self._uid_positions[queue_name].get(start_uid) if start_uid is not None else 0
         if position is None:
             return None
 
@@ -176,7 +178,9 @@ class LogCentralizer:
         """Fetch a subsection of the console logs from a queue."""
         return self._buffer.lookup_queue(queue_name, start, end)
 
-    def lookup_queue_by_uid(self, queue_name: str, start_uid: UUID, limit: int | None = None) -> list[str] | None:
+    def lookup_queue_by_uid(
+        self, queue_name: str, start_uid: UUID | None, limit: int | None = None
+    ) -> list[str] | None:
         """Fetch a subsection of the console logs from a queue."""
         return self._buffer.lookup_queue_by_uid(queue_name, start_uid, limit)
 

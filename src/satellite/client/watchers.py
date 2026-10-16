@@ -217,3 +217,18 @@ class StatusWatcher(_StateWatcher):
 
     def _uid_response_field(self) -> str:
         return "status_uid"
+
+
+class ConsoleWatcher(_StateWatcher):
+    """Threaded watcher object for monitoring changes in the console output on the remote server."""
+
+    def _polling_endpoint_name(self) -> str:
+        if self._last_received_uid is not None:
+            return f"/console_output_update?last_msg_uid={self._last_received_uid}"
+        return "/console_output"
+
+    def _sse_endpoint_name(self) -> str:
+        return "/console_output/stream"
+
+    def _uid_response_field(self) -> str:
+        return "last_msg_uid"

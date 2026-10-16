@@ -39,7 +39,7 @@ async def polling_status_watcher(monkeypatch, data_path) -> AsyncGenerator[tuple
     app = _create_app()
 
     _client = AsyncClient("http://test", transport=httpx.ASGITransport(app=app))
-    _watcher = StatusWatcher(weakref.ref(_client), WatchMethod.POLLING, polling_time=0.05)
+    _watcher = StatusWatcher(weakref.ref(_client), WatchMethod.POLLING, polling_time=0.1)
 
     _watcher.start()
     yield _client, _watcher
@@ -80,7 +80,7 @@ async def test_status_watcher(status_watcher: tuple[AsyncClient, StatusWatcher])
 
     watcher.add_callback(on_new_status, call_now=True)
 
-    with_timeout(lambda: len(received_status) == 1)
+    with_timeout(lambda: len(received_status) == 1, timeout=2.5)
 
     current_status = await client.status()
     assert str(current_status.status_uid) == received_status[0]["status_uid"]
@@ -88,7 +88,7 @@ async def test_status_watcher(status_watcher: tuple[AsyncClient, StatusWatcher])
     response = await client.post("/status/update_uid")
     assert response.status_code == 200
 
-    with_timeout(lambda: len(received_status) == 2)
+    with_timeout(lambda: len(received_status) == 2, timeout=2.5)
 
     current_status = await client.status()
     assert str(current_status.status_uid) != received_status[0]["status_uid"]

@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "click",
     "httpx",
+    "httpx-sse~=0.4.3",
     "numpydoc",
     "pydantic",
 ]

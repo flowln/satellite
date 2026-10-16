@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from collections.abc import Callable
+from collections.abc import AsyncIterable, Callable
 from functools import partial, update_wrapper, wraps
 import logging
 import os
@@ -9,7 +9,8 @@ import time
 from typing import Annotated, Any, Literal, no_type_check
 from uuid import UUID, uuid4 as create_uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Security, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Security, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from satellite.server.configuration import ManagerConfiguration
 from satellite.server.ipc import IPCCommunicationPair, create_server_from_event_loop
@@ -528,6 +529,34 @@ class QueueManager:
         await self.check_environment_process()
 
         return self._status
+
+    @get_endpoint(
+        "/status/stream",
+        dependencies=[Security(get_current_user, scopes=["read:status"])],
+        response_class=EventSourceResponse,
+    )
+    async def status_sse(self, request: Request) -> AsyncIterable[ManagerStatus]:
+        """
+        Retrieve the current state of the manager.
+
+        This is a Server-Sent Events (SSE) implementation, where a status object is
+        sent every time it changes. By default, a connection is maintained until the
+        client disconnects, with heart beat ping comments sent every 15 seconds.
+        """
+        last_status_uid = None
+
+        while not await request.is_disconnected():
+            if self._status.status_uid != last_status_uid:
+                last_status_uid = self._status.status_uid
+
+                yield self._status
+
+            await asyncio.sleep(0.250)
+
+    @post_endpoint("/status/update_uid", include_in_schema=False)
+    async def status_update_uid(self) -> None:
+        """Testing facility endpoint for updating the status uid."""
+        await self._status.update_manager_state(self._status.manager_state, force=True)
 
     async def _validate_lock_key(self, request: Request, lock_key: str | None = None):
         info = self._status.lock_info
@@ -1940,6 +1969,44 @@ class QueueManager:
 
         ret.lines = return_lines
         return ret
+
+    @get_endpoint(
+        "/console_output/stream",
+        dependencies=[Security(get_current_user, scopes=["read:console"])],
+        response_class=EventSourceResponse,
+    )
+    async def get_console_output_sse(
+        self,
+        request: Request,
+        last_event_uid: Annotated[UUID | None, Header()] = None,
+    ) -> AsyncIterable[LatestConsoleResponse]:
+        """
+        Retrieve the most recent lines of logging / console output, generated after some point.
+
+        Parameters
+        ----------
+        last_event_uid : UUID or str, optional
+            The uid (as returned by `/console_output/uid`) from which to start collecting lines.
+        """
+        log_centralizer = get_global_log_centralizer()
+
+        last_console_uid = last_event_uid
+
+        while not await request.is_disconnected():
+            current_console_uid = log_centralizer.get_uid_for_queue(self._name)
+            while last_console_uid != current_console_uid:
+                new_console_lines = log_centralizer.lookup_queue_by_uid(self._name, last_console_uid)
+                if new_console_lines is None:
+                    break
+
+                new_console_response = LatestConsoleResponse(last_msg_uid=current_console_uid)
+                new_console_response.lines = new_console_lines
+
+                last_console_uid = current_console_uid
+
+                yield ServerSentEvent(data=new_console_response, id=str(current_console_uid))
+
+            await asyncio.sleep(0.250)
 
     @get_endpoint("/console_output/uid", dependencies=[Security(get_current_user, scopes=["read:console"])])
     async def get_console_output_uid(self) -> ConsoleUidResponse:

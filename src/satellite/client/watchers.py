@@ -9,7 +9,7 @@ import weakref
 import httpx
 from httpx_sse import aconnect_sse, connect_sse
 
-logger = logging.getLogger("satellite.client.concurrent")
+logger = logging.getLogger("satellite.client.watchers")
 
 
 class WatchMethod(Enum):

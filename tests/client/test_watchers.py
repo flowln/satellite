@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from satellite.client.client import AsyncClient
-from satellite.client.concurrent import StatusWatcher, WatchMethod
+from satellite.client.watchers import StatusWatcher, WatchMethod
 
 from .asgi_transport_with_streaming import ASGIStreamingTransport
 
